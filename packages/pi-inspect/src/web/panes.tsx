@@ -18,6 +18,7 @@ export function PaneDrawer({
   children,
   side,
   trigger,
+  className = "",
 }: {
   name: string;
   open: boolean;
@@ -25,11 +26,12 @@ export function PaneDrawer({
   children: ReactNode;
   side: string;
   trigger: RefObject<HTMLButtonElement | null>;
+  className?: string;
 }) {
   return (
     <Dialog.Root open={open} onOpenChange={change}>
       <Dialog.Content
-        className={`side-drawer side-drawer-${side}`}
+        className={`side-drawer side-drawer-${side} ${className}`}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           if (trigger.current?.isConnected) trigger.current.focus({ preventScroll: true });

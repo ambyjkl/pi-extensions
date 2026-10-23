@@ -35,7 +35,16 @@ export interface Call {
   observedEndedAt?: number;
   branchAnchor: string | null;
 }
+export interface ToolGroup {
+  id: string;
+  label: string;
+  kind: "namespace" | "builtin" | "package" | "extension" | "unknown";
+  truncated?: boolean;
+}
 export interface ToolView {
+  catalogId?: string;
+  sourceGroup?: ToolGroup;
+  namespaceGroup?: ToolGroup;
   name: string;
   description: string;
   exposure: string;

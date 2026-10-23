@@ -60,9 +60,16 @@ for (const width of [1672, 1115, 900, 375]) {
     const secondary = page.getByRole("tablist", { name: "Environment resources" });
     await expect(secondary.getByRole("tab")).toHaveText(["Tools", "MCP Servers", "Skills"]);
     await expect(resource(page)).toContainText("active ≠ provider-visible");
-    await expect(resource(page)).toContainText("<script>window.unsafe=true</script>");
-    await expect(resource(page)).toContainText("Tool metadata truncated");
-    await expect(resource(page).locator("script")).toHaveCount(0);
+    await page.getByRole("button", { name: `Inspect ${value.tools[0]?.name}`, exact: true }).click();
+    const details =
+      width > 1100
+        ? page.getByRole("complementary", { name: "Tool details", exact: true })
+        : page.getByRole("dialog", { name: "Tool details", exact: true });
+    await expect(details).toContainText("<script>window.unsafe=true</script>");
+    await expect(details).toContainText("Tool metadata truncated");
+    await expect(details.locator("script")).toHaveCount(0);
+    expect(await page.evaluate(() => "unsafe" in window)).toBe(false);
+    if (width <= 1100) await page.keyboard.press("Escape");
     await tab(page, "Tools").focus();
     await page.keyboard.press("ArrowRight");
     await expect(tab(page, "MCP Servers")).toBeFocused();
@@ -114,6 +121,7 @@ for (const width of [320, 375, 900, 1672]) {
       "long_unbroken_description_".repeat(12);
     value.tools = Array.from({ length: 12 }, (_, index) => ({
       ...tool,
+      catalogId: `environment-tool-${index}`,
       name: `inspect_session_${index}`,
       description,
       active: index % 2 === 0,
@@ -124,34 +132,36 @@ for (const width of [320, 375, 900, 1672]) {
     await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: server.origin });
     await tab(page, "Environment").click();
     const panel = resource(page);
-    const card = panel.locator(".inventory-card").first();
+    const inspect = panel.getByRole("button", { name: "Inspect inspect_session_0", exact: true });
+    const card =
+      width > 1100
+        ? page.getByRole("complementary", { name: "Tool details", exact: true })
+        : page.getByRole("dialog", { name: "Tool details", exact: true });
+    await inspect.click();
     const schema = card.getByRole("button", { name: "Schema · inspect_session_0", exact: true });
     const source = card.getByRole("button", { name: "Source · inspect_session_0", exact: true });
     await expect(source).toHaveAttribute("aria-expanded", "false");
     await expect(schema).toHaveAttribute("aria-expanded", "false");
-    await expect(panel.locator(".json-tree")).toHaveCount(0);
+    await expect(card.locator(".json-tree")).toHaveCount(0);
     await expect(card.locator(".inventory-description")).toHaveText(description);
     for (const selector of [
       ".environment-surface",
-      ".inventory-card",
+      ".tool-detail-content",
       ".inventory-description",
-      ".inventory-card .rt-Heading",
+      ".tool-detail-content .rt-Heading",
     ]) {
       await expect(page.locator(selector).first()).toHaveCSS("font-family", /monospace/);
     }
-    await expect(card.locator(".rt-Heading")).toHaveCSS("font-size", "13px");
+    await expect(card.locator(".tool-detail-content > .rt-Heading")).toHaveCSS("font-size", "14px");
     await expect(page.locator(".inspector-app")).toHaveCSS("font-family", /monospace/);
     await expect(page.locator(".app-header")).toHaveCSS("height", width <= 680 ? "80px" : "64px");
     await expect(page.locator(".app-footer")).toHaveCSS("height", "34px");
 
+    if (width <= 1100) await page.keyboard.press("Escape");
     for (const appearance of ["light", "dark"]) {
       await expect(page.locator(".inspector-app")).toHaveClass(new RegExp(appearance));
       const background = appearance === "light" ? "rgb(245, 242, 235)" : "rgb(32, 35, 39)";
       await expect(page.locator(".inspector-app")).toHaveCSS("background-color", background);
-      await expect(card).toHaveCSS(
-        "background-color",
-        appearance === "light" ? "rgb(250, 248, 243)" : "rgb(38, 41, 46)",
-      );
       await expect(page.locator(".brand-logo")).toHaveCSS("background-color", "rgb(183, 203, 234)");
       const primary = page.getByRole("tablist", { name: "Inspection source" });
       await expect(primary).toHaveCSS(
@@ -177,6 +187,15 @@ for (const width of [320, 375, 900, 1672]) {
       expect(await inactiveTab.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe(
         idleBackground,
       );
+      if (width > 680) {
+        await expect(page.getByText("Read-only", { exact: true })).toBeVisible();
+        await expect(page.locator(".app-footer span").last()).toBeVisible();
+      }
+      if (width <= 1100) await inspect.click();
+      await expect(card).toHaveCSS(
+        "background-color",
+        appearance === "light" ? "rgb(250, 248, 243)" : "rgb(38, 41, 46)",
+      );
       const idleDisclosure = await schema.evaluate((element) => getComputedStyle(element).backgroundColor);
       await schema.hover();
       expect(await schema.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe(idleDisclosure);
@@ -184,8 +203,11 @@ for (const width of [320, 375, 900, 1672]) {
       const contrasts = await page
         .locator(
           ".environment-heading p, .resource-panel > p, " +
-            ".inventory-card:first-of-type .rt-Badge, .inventory-card:first-of-type .section-toggle, " +
-            ".inventory-card:first-of-type .copy-button, .environment-surface .navigation-tabs button",
+            ".tool-detail-content .rt-Badge, .tool-detail-content .section-toggle, " +
+            ".tool-detail-content .copy-button, .tool-explorer .navigation-tabs button, " +
+            ".tool-inventory-table thead th, .tool-inventory-table td > span, .tool-note, " +
+            ".tool-source, .tool-source > span, .tool-source-category > summary, .tool-count, " +
+            ".tool-toolbar-controls > label, .tool-toolbar-controls select, .tool-columns-menu > summary",
         )
         .evaluateAll((elements) =>
           elements
@@ -220,27 +242,30 @@ for (const width of [320, 375, 900, 1672]) {
               };
             }),
         );
-      for (const { text, ratio } of contrasts) expect(ratio, `${appearance}: ${text}`).toBeGreaterThanOrEqual(4.5);
+      expect(
+        contrasts.filter(({ ratio }) => ratio < 4.5),
+        `${appearance} text contrast`,
+      ).toEqual([]);
       await panel.evaluate((element) => {
         element.scrollTop = 0;
       });
       const bounds = await card.boundingBox();
       expect(bounds?.width).toBeLessThanOrEqual(1040);
       expect(
-        Number.parseFloat(await card.evaluate((element) => getComputedStyle(element).paddingLeft)),
-      ).toBeGreaterThanOrEqual(12);
-      if (width > 680) {
-        await expect(page.getByText("Read-only", { exact: true })).toBeVisible();
-        await expect(page.locator(".app-footer span").last()).toBeVisible();
-      }
+        Number.parseFloat(
+          await card.locator(".tool-detail-content").evaluate((element) => getComputedStyle(element).paddingLeft),
+        ),
+      ).toBeGreaterThanOrEqual(width <= 680 ? 4 : 12);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && scrollY === 0)).toBe(true);
       await page.screenshot({
         path: test.info().outputPath(`resources-${width}-${appearance}.png`),
         animations: "disabled",
       });
+      if (width <= 1100) await page.keyboard.press("Escape");
       if (appearance === "light") await page.getByRole("button", { name: "Toggle appearance" }).click();
     }
 
+    if (width <= 1100) await inspect.click();
     await schema.focus();
     await page.keyboard.press("Enter");
     await expect(schema).toHaveAttribute("aria-expanded", "true");
@@ -255,11 +280,15 @@ for (const width of [320, 375, 900, 1672]) {
     await page.keyboard.press("Space");
     await expect(schema).toHaveAttribute("aria-expanded", "false");
     await expect(source).toHaveAttribute("aria-expanded", "false");
-    const last = panel.locator(".inventory-card").last();
-    await panel.evaluate((element) => {
+    await page
+      .getByRole("button", { name: width <= 1100 ? "Close Tool details" : "Close tool details", exact: true })
+      .click();
+    const table = panel.getByRole("region", { name: "Scrollable tools table" });
+    const last = table.getByRole("button", { name: "Inspect inspect_session_11", exact: true });
+    await table.evaluate((element) => {
       element.scrollTop = element.scrollHeight;
     });
-    await expect(last.getByRole("button", { name: "Copy display data" }).last()).toBeInViewport();
+    await expect(last).toBeInViewport();
     const lastBounds = await last.boundingBox();
     const footerBounds = await page.locator(".app-footer").boundingBox();
     expect((lastBounds?.y ?? 0) + (lastBounds?.height ?? 0)).toBeLessThanOrEqual(footerBounds?.y ?? 0);

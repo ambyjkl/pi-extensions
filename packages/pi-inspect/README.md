@@ -14,7 +14,7 @@ A read-only browser view of the current Pi session, with consent-gated live cont
 - Read branch-scoped Session history with conversation groups, direct search matches, and an explicit internal-events view.
 - Inspect actual branches, historical prompts, tools, skills and codemode evidence through content-first Event details without changing Pi's active leaf.
 - Follow bounded live tool calls, including observed nested calls, with explicit provenance and unavailable-data labels.
-- Browse current Tools, MCP registrations and the startup skill catalog in Environment, separate from historical evidence.
+- Browse current tools in a source explorer with selectable table columns and a detail panel; inspect MCP registrations and the startup skill catalog separately.
 - Review recorded branch cache usage, hit-rate trends, request comparisons and estimated costs without another extension.
 - Use light/dark and responsive browser layouts with keyboard navigation.
 
@@ -46,7 +46,7 @@ In Pi's interactive TUI, run `/inspect` and accept the sensitive-data warning. T
 
 Use the Context, Session, Cache and Environment tabs below the header. Context shows the last observed model input, or an explicitly labeled session-derived fallback. Session contains History, Branch view and Captured executions, with inline filters; selecting a record opens Event details beside the list, or in a drawer on narrow screens. **View branch context** opens an explicit historical projection, not a captured request.
 
-Environment contains Tools, MCP Servers and Skills. These show current tool metadata, extension-registered MCP server names and the skill catalog captured at inspector startup, not historical request evidence. Switching tabs retains resource reading state. Independent provider observations remain in Context.
+Environment contains Tools, MCP Servers and Skills. Tools provides source navigation, a searchable table, exposure filters and selectable columns. Select a tool to open its description, parameters, source and schema on the right. Group by namespace/source, registering extension/package or exposure. On narrow screens, Sources and Tool details open as drawers. Column and group choices stay in memory; they do not change Pi settings or tool activation. MCP Servers shows extension registrations; Skills shows the catalog captured at inspector startup. These views are not historical request evidence. Independent provider observations remain in Context.
 
 Cache follows Pi's active branch, with weighted usage totals, the latest 200 records and up to 32 conversational trend points in a fixed 0–100% vertical bar chart. Text labels distinguish Low, Moderate, High and unavailable values; unknown is not 0%. Select a point with the keyboard or pointer to open Event details. Summary and warming usage contribute to totals but not conversational comparisons. Costs and re-billed tokens are estimates, not billing or proof of prefix reuse. See the [cache history contract](./docs/cache-history.md) for display states, fixed visual targets, epoch boundaries, formulas and bounds. Streaming and historical-branch cache previews are not included.
 

@@ -1,8 +1,9 @@
-import { Badge, Card, Flex, Heading, Text } from "@radix-ui/themes";
+import { Badge, Card, Heading, Text } from "@radix-ui/themes";
 import { useState } from "react";
 import type { Snapshot } from "../model.js";
 import { Data } from "./components.js";
 import { NavigationTabs } from "./navigation-tabs.js";
+import { ToolExplorer } from "./tool-explorer.js";
 
 export type ResourceTab = "tools" | "mcp" | "skills";
 const resources = [
@@ -11,7 +12,7 @@ const resources = [
   { value: "skills", label: "Skills" },
 ] as const;
 
-export function Environment({ snapshot }: { snapshot?: Snapshot }) {
+export function Environment({ snapshot, active = true }: { snapshot?: Snapshot; active?: boolean }) {
   const [tab, setTab] = useState<ResourceTab>("tools");
   // Visit panels once to retain scroll/disclosure state, without mounting unseen catalogs.
   const [visited, setVisited] = useState<ReadonlySet<ResourceTab>>(() => new Set(["tools"]));
@@ -43,40 +44,13 @@ export function Environment({ snapshot }: { snapshot?: Snapshot }) {
         >
           {visited.has(value) && (
             <>
-              <Heading size="3">{label}</Heading>
+              {value !== "tools" && <Heading size="3">{label}</Heading>}
               {value === "tools" && (
-                <>
-                  <p>Current active ≠ provider-visible. Source metadata does not prove MCP server ownership.</p>
-                  {snapshot && !snapshot.tools.length && <p>No tools in this snapshot.</p>}
-                  {snapshot?.tools.map((tool, index) => (
-                    // biome-ignore lint/suspicious/noArrayIndexKey: Bounded display names and paths can collide; position distinguishes catalog records.
-                    <Card key={`${index}-${tool.name}`} className="inventory-card">
-                      <div className="inventory-card-heading">
-                        <Heading size="2">{tool.name}</Heading>
-                        <Flex gap="1" wrap="wrap" className="inventory-status">
-                          <Badge highContrast color={tool.active ? "green" : "gray"}>
-                            {tool.active ? "active" : "inactive"}
-                          </Badge>
-                          <Badge highContrast color={tool.callable ? "blue" : "gray"}>
-                            {tool.callable ? "callable" : "not callable"}
-                          </Badge>
-                        </Flex>
-                      </div>
-                      <Flex gap="1" wrap="wrap" className="inventory-metadata">
-                        <Badge highContrast color="gray">
-                          {tool.namespace ?? "Namespace unavailable"}
-                        </Badge>
-                        <Badge highContrast color="gray">
-                          {tool.exposure}
-                        </Badge>
-                      </Flex>
-                      <p className="inventory-description">{tool.description}</p>
-                      {tool.metadataTruncated && <p>Tool metadata truncated.</p>}
-                      <Data label={`Source · ${tool.name}`} data={tool.source} defaultOpen={false} />
-                      <Data label={`Schema · ${tool.name}`} data={tool.schema} defaultOpen={false} />
-                    </Card>
-                  ))}
-                </>
+                <ToolExplorer
+                  key={snapshot?.generation ?? "loading"}
+                  tools={snapshot?.tools ?? []}
+                  active={active && tab === "tools"}
+                />
               )}
               {value === "mcp" && (
                 <>

@@ -26,6 +26,7 @@ import type { BranchView, ContextComposition, DetailView, EntrySummary, SkillVie
 import { nativeProjection } from "./native-projection.js";
 import { capture, displayText, readSessionId, readSessionName } from "./privacy.js";
 import { systemReplayIssue } from "./system-message.js";
+import { projectToolCatalog } from "./tool-catalog.js";
 
 export function summarize(entry: SessionEntry, label?: string): EntrySummary {
   const issue = identityIssue(entry);
@@ -151,30 +152,7 @@ export function snapshot(
     context: observedContext ?? sessionContext(manager, index),
     cache: cacheHistory(manager, index, resolveCostModel),
     currentPrompt: capture(prompt, 65536),
-    tools: tools.slice(0, 256).map((t) => ({
-      name: displayText(t.name).slice(0, 512),
-      description: displayText(t.description).slice(0, 512),
-      metadataTruncated: [t.name, t.description, t.namespace?.name ?? ""].some(
-        (text) => displayText(text).length > 512,
-      ),
-      source: t.sourceInfo
-        ? capture(
-            {
-              source: t.sourceInfo.source,
-              path: t.sourceInfo.path,
-              scope: t.sourceInfo.scope,
-              origin: t.sourceInfo.origin,
-            },
-            2048,
-          )
-        : undefined,
-      exposure: t.exposure,
-      active: active.includes(t.name),
-      callable:
-        t.exposure === "codemode" || t.exposure === "deferred" || (t.exposure === "direct" && active.includes(t.name)),
-      namespace: t.namespace ? displayText(t.namespace.name).slice(0, 512) : undefined,
-      schema: capture(t.parameters, 2048),
-    })),
+    tools: projectToolCatalog(tools, active),
     skills: skills.slice(0, 256).map((s) => ({
       name: displayText(s.name).slice(0, 512),
       path: displayText(s.path).slice(0, 2048),
