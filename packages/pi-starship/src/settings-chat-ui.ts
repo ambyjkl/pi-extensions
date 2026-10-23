@@ -102,6 +102,12 @@ export function createSettingsChatComponent(options: {
   };
   signal.addEventListener("abort", abort, { once: true });
   const rule = new HorizontalRule({ ruleStyle: (text) => theme.fg("border", text) });
+  const previewRule = new HorizontalRule({
+    label: "Footer preview — not saved",
+    labelAlignment: "left",
+    ruleStyle: (text) => theme.fg("border", text),
+    labelStyle: (text) => theme.fg("muted", text),
+  });
   const transcript = createSettingsChatTranscript(agent, tui, draft.directory);
   // Native Editor expands paste markers and clears itself before calling onSubmit.
   editor.onSubmit = (input) => {
@@ -147,25 +153,26 @@ export function createSettingsChatComponent(options: {
         .slice(0, 3);
       // Match Pi's transcript -> editor -> footer hierarchy. The fullscreen overlay
       // covers the parent footer, so the real draft preview is part of this dock.
-      const content = [
-        ...input,
-        theme.fg("muted", "Footer preview — not saved"),
-        ...preview,
+      const footer = [
         ...diagnostics.map((line) => theme.fg("muted", line)),
         theme.fg("dim", "pi-starship configuration chat · preview only"),
         theme.fg("muted", pending ? "Agent working · save unavailable" : "Cancel reviews · ctrl+c discards"),
       ];
-      if (content.length > rows) {
+      // Horizontal boundaries preserve the statusline's full responsive render width.
+      // Never show a preview with missing boundaries; optional chrome yields first.
+      const previewFrame = [previewRule.render(width)[0] ?? "", ...preview, rule.render(width)[0] ?? ""];
+      if (input.length + previewFrame.length > rows) {
         return renderBoundedFrame({
           width,
           maxRows: rows,
           rule: rule.render(width)[0] ?? "",
           title: [],
-          content,
+          content: [...input, theme.fg("muted", "Footer preview hidden — enlarge the terminal"), ...footer],
           focusedRow: cursor,
-          priorityRows: [cursor, input.length + 1],
+          priorityRows: [cursor, input.length],
         });
       }
+      const content = [...input, ...previewFrame, ...footer.slice(0, rows - input.length - previewFrame.length)];
       const available = rows - content.length;
       const history = available > 0 ? transcript.render(width).slice(-available) : [];
       return [...history, ...Array.from({ length: available - history.length }, () => ""), ...content].map((line) =>

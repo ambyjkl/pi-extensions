@@ -78,6 +78,8 @@ test("fullscreen dock handles zero dimensions, callback theme changes, and read-
   const roles: string[] = [];
   type Options = Parameters<typeof createSettingsChatComponent>[0];
   const terminal = { rows: 40 };
+  let previewLines = ["read-only footer"];
+  const previewWidths: number[] = [];
   const component = createSettingsChatComponent({
     agent: f.agent,
     draft: f.draft,
@@ -92,7 +94,10 @@ test("fullscreen dock handles zero dimensions, callback theme changes, and read-
     } as Options["theme"],
     keybindings: getKeybindings() as unknown as Options["keybindings"],
     signal: f.controller.signal,
-    preview: () => ["read-only footer"],
+    preview: (width) => {
+      previewWidths.push(width);
+      return previewLines;
+    },
     complete() {},
   });
   try {
@@ -102,14 +107,45 @@ test("fullscreen dock handles zero dimensions, callback theme changes, and read-
     assert.deepEqual(component.render(0), []);
     const frame = component.render(80);
     assert.equal(frame.length, 40);
-    assert.equal(frame.filter((line) => /^─+$/u.test(line)).length, 2);
+    assert.equal(frame.filter((line) => /^─+$/u.test(line)).length, 3);
+    const previewRow = frame.findIndex((line) => line.includes("read-only footer"));
+    assert.match(frame[previewRow - 1], /^─ Footer preview — not saved ─+$/u);
+    assert.match(frame[previewRow + 1], /^─{80}$/u);
+    assert.ok(frame.findIndex((line) => line.includes("Valid draft")) > previewRow + 1);
+    assert.ok(previewWidths.every((width) => width === 80));
     assert.match(frame.at(-2) ?? "", /configuration chat/u);
-    assert.ok(roles.includes("borderMuted") && roles.includes("dim") && roles.includes("muted"));
+    assert.ok(
+      roles.includes("border") && roles.includes("borderMuted") && roles.includes("dim") && roles.includes("muted"),
+    );
     const calls = roles.length;
     component.invalidate();
     component.render(80);
     assert.ok(roles.length > calls);
     assert.ok(!frame.find((line) => line.includes("read-only footer"))?.includes("→"));
+    previewLines = ["PREVIEW-FIRST", "\x1b[31mPREVIEW-SECOND 中文\x1b[39m"];
+    for (const [rows, shown] of [
+      [4, 0],
+      [6, 1],
+      [7, 1],
+      [8, 2],
+      [12, 2],
+      [40, 2],
+    ]) {
+      terminal.rows = rows;
+      const resized = component.render(80);
+      assert.ok(resized.length <= rows);
+      const start = resized.findIndex((line) => line.includes("PREVIEW-FIRST"));
+      if (shown > 0) {
+        assert.ok(start >= 0);
+        assert.match(resized[start - 1], /^─ Footer preview — not saved ─+$/u);
+        if (shown === 2) assert.equal(resized[start + 1], previewLines[1]);
+        assert.match(resized[start + shown], /^─{80}$/u);
+      } else {
+        assert.equal(start, -1);
+        assert.ok(!resized.some((line) => line.includes("PREVIEW-SECOND")));
+      }
+      assert.ok(resized.some((line) => line.includes(CURSOR_MARKER)));
+    }
     terminal.rows = 0;
     assert.deepEqual(component.render(80), []);
   } finally {
