@@ -32,32 +32,6 @@
   font-size: 12px;
   line-height: 18px;
 }
-.environment-surface > .navigation-tabs {
-  align-self: flex-start;
-  margin: 0 4px 4px;
-  gap: 4px;
-  padding: 3px;
-  background: var(--panel-raised);
-  border-radius: 6px;
-}
-.environment-surface > .navigation-tabs button {
-  min-height: 30px;
-  padding: 5px 12px;
-  border: 1px solid transparent;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--secondary);
-}
-.environment-surface > .navigation-tabs button:hover {
-  background: var(--surface-hover);
-  color: var(--gray-12);
-}
-.environment-surface > .navigation-tabs button[aria-selected="true"] {
-  background: var(--selected-bg);
-  border-color: var(--blue-7);
-  color: var(--blue-12);
-  font-weight: 600;
-}
 .environment-surface .resource-panel {
   flex: 1;
   min-height: 0;

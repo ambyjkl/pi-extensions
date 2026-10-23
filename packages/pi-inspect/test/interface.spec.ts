@@ -135,7 +135,7 @@ test("branch preview shares composition without unrelated current information or
   await expect(page.locator(".inspector-panel")).toHaveCount(0);
   await page.getByRole("button", { name: "Back to last observed context", exact: true }).click();
   await expect(page.locator(".observed-context .segment-row").first()).toContainText("Observed input only");
-  await page.getByRole("tab", { name: "Environment", exact: true }).click();
+  await page.getByRole("tab", { name: "Tools", exact: true }).click();
   await expect(page.getByText("mcp__docs__search", { exact: true })).toBeVisible();
   expect(f.manager.getLeafId()).toBe(leaf);
 });
@@ -320,7 +320,7 @@ for (const presentation of ["List", "Timeline"] as const) {
   });
 }
 
-test("Environment mounts catalogs on first visit and schemas only on disclosure", async ({ page }) => {
+test("resource tabs mount catalogs on first visit and schemas only on disclosure", async ({ page }) => {
   const template = tools[0];
   if (!template) throw Error("Missing tool fixture");
   inventoryTools = Array.from({ length: 256 }, (_, i) => ({
@@ -333,7 +333,7 @@ test("Environment mounts catalogs on first visit and schemas only on disclosure"
   await page.goto(server.url);
   await expect(page.locator(".segment-row").first()).toBeVisible();
   await expect(page.locator(".inventory-card, .tool-inventory-table, .tool-detail-content")).toHaveCount(0);
-  await page.getByRole("tab", { name: "Environment", exact: true }).click();
+  await page.getByRole("tab", { name: "Tools", exact: true }).click();
   const inventory = page.locator("#resource-panel-tools");
   await expect(inventory.locator("tbody tr")).toHaveCount(256);
   await expect(inventory.locator(".json-tree")).toHaveCount(0);
@@ -358,7 +358,7 @@ test("Environment mounts catalogs on first visit and schemas only on disclosure"
   const top = await table.evaluate((element) => element.scrollTop);
   expect(top).toBeGreaterThan(0);
   await page.getByRole("tab", { name: "Session", exact: true }).click();
-  await page.getByRole("tab", { name: "Environment", exact: true }).click();
+  await page.getByRole("tab", { name: "Tools", exact: true }).click();
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
   await page.getByRole("tab", { name: "Skills", exact: true }).click();
   await expect(page.locator("#resource-panel-skills .inventory-card")).toHaveCount(1);

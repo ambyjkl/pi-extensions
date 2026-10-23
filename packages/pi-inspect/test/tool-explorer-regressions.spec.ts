@@ -55,7 +55,7 @@ const inspect = (page: Page, name: string) => table(page).getByRole("button", { 
 async function open(page: Page, width = 1672, height = 900) {
   await page.setViewportSize({ width, height });
   await page.goto(server.url);
-  await tab(page, "Environment").click();
+  await tab(page, "Tools").click();
   await expect(table(page).locator("tbody tr")).toHaveCount(catalog.length);
 }
 async function bounded(page: Page) {
@@ -128,7 +128,7 @@ test("Columns repositions during resize and closes on main navigation", async ({
   await expect(last).toBeChecked();
   await tab(page, "Session").dispatchEvent("click");
   await expect(menu).toHaveCount(0);
-  await tab(page, "Environment").click();
+  await tab(page, "Tools").click();
   await expect(menu).toHaveCount(0);
 });
 

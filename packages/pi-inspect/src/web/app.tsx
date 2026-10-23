@@ -13,7 +13,7 @@ import { Cache } from "./cache.js";
 import { CapturedExecutions } from "./captured-executions.js";
 import { ContextComposition } from "./context-composition.js";
 import { ContextInventory } from "./context-inventory.js";
-import { Environment } from "./environment.js";
+import { ResourcePanel, type ResourceTab, resources } from "./environment.js";
 import { type Filters, matches } from "./format.js";
 import { history, internalEntry } from "./history.js";
 import { Inspector } from "./inspector.js";
@@ -24,13 +24,13 @@ import { boundedSearch, searchNeedle } from "./search.js";
 import { SessionFilters } from "./session-filters.js";
 import { Trace } from "./trace.js";
 
-type Surface = "context" | "events" | "cache" | "environment";
+type Surface = "context" | "events" | "cache" | ResourceTab;
 type SessionView = "history" | "branches" | "executions";
 const surfaces = [
   { value: "context", label: "Context" },
   { value: "events", label: "Session" },
   { value: "cache", label: "Cache" },
-  { value: "environment", label: "Environment" },
+  ...resources,
 ] as const;
 
 type Selection = { kind: "entry" | "call"; id: string; serial: number; filterVersion?: number; anchor?: string | null };
@@ -45,7 +45,8 @@ function App() {
   const [selection, setSelection] = useState<Selection>();
   const [view, setView] = useState("list");
   const [surface, setSurface] = useState<Surface>("context");
-  const [environmentVisited, setEnvironmentVisited] = useState(false);
+  // Mount resource catalogs on first visit, then retain their independent reading state.
+  const [visitedResources, setVisitedResources] = useState<ReadonlySet<ResourceTab>>(() => new Set());
   const [sessionView, setSessionView] = useState<SessionView>("history");
   const [historyLeaf, setHistoryLeaf] = useState<string | null>(null);
   const [showInternal, setShowInternal] = useState(false);
@@ -73,7 +74,8 @@ function App() {
   const narrow = useNarrow();
   const inspectorSize = inspectorOpen ? Math.min(inspectorWidth, Math.max(0, window.innerWidth - 600)) : 0;
   function changeSurface(value: Surface) {
-    if (value === "environment") setEnvironmentVisited(true);
+    if (value === "tools" || value === "mcp" || value === "skills")
+      setVisitedResources((old) => (old.has(value) ? old : new Set([...old, value])));
     if (value === "context") setPreview(undefined);
     if (narrow) setInspectorOpen(false);
     setSurface(value);
@@ -404,15 +406,20 @@ function App() {
           >
             <Cache report={snapshot?.cache} select={selectEntry} />
           </div>
-          <div
-            className="environment-surface"
-            role="tabpanel"
-            id="surface-panel-environment"
-            aria-labelledby="surface-tab-environment"
-            hidden={surface !== "environment"}
-          >
-            {environmentVisited && <Environment snapshot={snapshot} active={surface === "environment"} />}
-          </div>
+          {resources.map((resource) => (
+            <div
+              key={resource.value}
+              className="environment-surface"
+              role="tabpanel"
+              id={`surface-panel-${resource.value}`}
+              aria-labelledby={`surface-tab-${resource.value}`}
+              hidden={surface !== resource.value}
+            >
+              {visitedResources.has(resource.value) && (
+                <ResourcePanel snapshot={snapshot} resource={resource} active={surface === resource.value} />
+              )}
+            </div>
+          ))}
           <div
             className="events-surface"
             role="tabpanel"

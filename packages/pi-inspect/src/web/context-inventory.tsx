@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { Snapshot } from "../model.js";
 import { Data } from "./components.js";
 
-/** Current prompt only; resource catalogs live in Environment, never historical evidence. */
+/** Current prompt only; resource tabs contain catalogs, never historical evidence. */
 export function ContextInventory({ snapshot }: { snapshot?: Snapshot }) {
   const [open, setOpen] = useState(false);
   return (
@@ -15,7 +15,7 @@ export function ContextInventory({ snapshot }: { snapshot?: Snapshot }) {
             data={snapshot?.currentPrompt}
             defaultOpen={false}
           />
-          <p>Current tools, MCP registrations and the startup skill catalog are in Environment.</p>
+          <p>Use Tools, MCP Servers and Skills for current resource catalogs.</p>
         </div>
       )}
     </details>

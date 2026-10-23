@@ -82,7 +82,7 @@ const details = (page: Page) => page.getByRole("complementary", { name: "Tool de
 async function open(page: Page, width = 1672) {
   await page.setViewportSize({ width, height: 900 });
   await page.goto(server.url);
-  await tab(page, "Environment").click();
+  await tab(page, "Tools").click();
   await expect(inventory(page).locator("tbody tr")).toHaveCount(catalog.length);
 }
 async function bounded(page: Page) {
@@ -323,14 +323,13 @@ for (const width of [320, 900, 1100]) {
       await expect(trigger).toBeFocused();
     }
     for (const drawer of ["sources", "details"]) {
-      for (const destination of ["Skills", "Session"]) {
+      for (const destination of ["Context", "Session", "Cache", "MCP Servers", "Skills"]) {
         await (drawer === "sources" ? sourceTrigger : trigger).click();
         await expect(page.getByRole("dialog")).toHaveCount(1);
         // A host navigation can replace the active pane while a modal owns pointer focus.
         await page.getByRole("tab", { name: destination, exact: true, includeHidden: true }).dispatchEvent("click");
         await expect(page.getByRole("dialog")).toHaveCount(0);
         await expect(page.locator(".side-drawer")).toHaveCount(0);
-        await tab(page, "Environment").click();
         await tab(page, "Tools").click();
         await expect(page.getByRole("dialog")).toHaveCount(0);
       }
