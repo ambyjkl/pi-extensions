@@ -411,7 +411,7 @@ function App() {
             aria-labelledby="surface-tab-environment"
             hidden={surface !== "environment"}
           >
-            {environmentVisited && <Environment snapshot={snapshot} />}
+            {environmentVisited && <Environment snapshot={snapshot} active={surface === "environment"} />}
           </div>
           <div
             className="events-surface"
