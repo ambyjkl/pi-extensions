@@ -2,7 +2,7 @@
 
 ## Outcome
 
-`/starship` → **Configure with agent…** opens a separate, in-memory configuration agent. It explicitly loads the bundled skill and exposes only `read`, `write`, and `edit`. Agent mutations affect a private draft. Valid changes redraw the footer preview without reload; only a reviewed and confirmed user save publishes active settings.
+`/starship` → **Configure with agent…** opens a separate, fullscreen, in-memory configuration agent. It explicitly loads the bundled skill and exposes only `read`, `write`, and `edit`. Agent mutations affect a private draft. Valid changes redraw the footer preview without reload; only a reviewed and confirmed user save publishes active settings.
 
 ## Architecture and semantic audit
 
@@ -14,7 +14,7 @@ Preview calls only the existing redraw path; it does not restart module collecto
 
 Lifecycle review covers user cancellation, component disposal, native confirmation, partial initialization, session replacement, reload, and shutdown. The child is aborted and awaited before draft removal. UI subscriptions and abort listeners are removed. Tools remain disabled after a cleanup failure, and draft removal can be retried after permissions recover. Session generation and `sessionManager` ownership prevent stale preview or publication callbacks. Shutdown awaits the registered child cleanup.
 
-The UI uses Pi's native `Editor` and Kit framing/review primitives. Native submission already expands paste markers; moving an unsubmitted draft uses `getExpandedText()`. Input-action collisions take precedence over review cancellation. Table-driven tests cover aliases, modifier order, printable input, legacy control collisions, Kitty/modifyOtherKeys packets, invalid bindings, native editing fallbacks, and Escape fallback. Ctrl+C remains hard discard. Display controls are removed before transcript/diagnostic layout; raw agent payloads are unchanged.
+The UI uses Pi's public fullscreen overlay, native `Editor`, native user/assistant/tool message components, and Kit review/framing primitives. The transcript grows above a fixed editor/preview dock. Native message backgrounds, Markdown, padding, and inter-question spacing replace flattened role-prefixed text. The body uses Pi's native theme handling; dock chrome uses callback-provided roles. Theme invalidation recreates native components to remove captured colors. Display caches are released on disposal, and disposed or aborted views render no new content. No second TUI or shared-terminal handoff is needed. Native submission already expands paste markers; moving an unsubmitted draft uses `getExpandedText()`. Input-action collisions take precedence over review cancellation. Table-driven tests cover aliases, modifier order, printable input, legacy control collisions, Kitty/modifyOtherKeys packets, invalid bindings, native editing fallbacks, and Escape fallback. Ctrl+C remains hard discard. Display controls are removed before transcript/diagnostic layout; raw agent payloads are unchanged.
 
 ## Guides and decisions
 
@@ -24,21 +24,34 @@ The final diff was reviewed for correctness, security, lifecycle safety, compati
 
 The existing TOML settings format, single source forwarder, generated entrypoint, and command routes remain unchanged. The new child runtime stays behind a dynamic command import; generated-import and eager-graph tests cover that boundary. The only added Pi peer is agent-core, with its matching workspace development dependency and lockfile entry. A minor Changeset records the published behavior change.
 
-Intentional UI differences are documented in the package README: the compact view shows recent messages, full reviews expose the transcript/document, editor actions win cancel-key collisions, Escape is a fallback, and reviews require **Continue**. Cancelling a review discards the flow; disposal cannot serve as acceptance of a save review. Chat history, automatic compaction/retries, and parent usage accounting are not added.
+Intentional UI differences are documented in the package README: the fullscreen view shows recent messages with expanded read-only tool output, full reviews expose the transcript/document, editor actions win cancel-key collisions, Escape is a fallback, and reviews require **Continue**. Cancelling a review discards the flow; disposal cannot serve as acceptance of a save review. Chat history, automatic compaction/retries, and parent usage accounting are not added.
 
 ## Verification evidence
 
 - `npm run check`: passed builds, Biome, package boundaries, and every workspace typecheck.
-- `npm test`: passed 14,490 tests in 768 files; two existing platform/filesystem-specific tests were skipped (`test/macos-install.test.ts` and the native case-insensitive filesystem case in `pi-sync`). No changed test is skipped on this Linux host.
-- Focused child, draft, UI, command, and skill suites: 67 tests passed; generated Jiti lazy-boundary and profile regression coverage also passed in the full gate.
-- `npm run package:pack -- starship`: passed. The actual tarball contains 151 files, including all four new source modules, the generated runtime, and the skill/references; test fixtures are excluded. SHA-1: `175b70909345f4661d997680b0f60783e7279c1f`.
+- `npm test`: passed 14,496 tests in 769 files; two existing platform/filesystem-specific tests were skipped (`test/macos-install.test.ts` and the native case-insensitive filesystem case in `pi-sync`). No changed test is skipped on this Linux host.
+- The focused fullscreen/native-message, UI, command, and generated-Jiti suites passed 54 tests. Native-renderer parity covers Markdown, backgrounds, later-question spacing, tool success/error, streaming/finalization, theme changes, and sanitized fallback tool metadata. Existing child, draft, skill, and profile regressions also passed in the full gate.
+- `npm run package:pack -- starship`: passed. The actual tarball contains 152 files, including all five new source modules, the generated runtime, and the skill/references; test fixtures are excluded. SHA-1: `dd8c995aa867996e9758d1e5ae1d6babc2c52d8f`.
 - Installed that tarball in a separate temporary npm root with production dependencies and no automatic Pi peer installation, then loaded it through the real Pi CLI/Jiti runtime.
-- `uv run python packages/pi-starship/test/settings-chat-smoke.py`: passed both discard and save scenarios for the local package directory. Running the same harness against the separately installed tarball also passed both scenarios. Each scenario executes `read`, `write`, and `edit` over two turns, reads an installed skill reference, verifies unchanged active bytes before save, checks History/save or discard, confirms zero main-thread messages, and checks draft cleanup. No reload or external model provider is used.
+- `uv run python packages/pi-starship/test/settings-chat-smoke.py`: passed discard and save scenarios with both regular and fullscreen parent TUIs for the local package directory. Running the same harness against the separately installed tarball also passed all four scenarios, for eight real-CLI scenarios in total. Each scenario executes `read`, `write`, and `edit` over two turns, reads an installed skill reference, verifies unchanged active bytes before save, checks History/save or discard, confirms zero main-thread messages, and checks draft cleanup. No reload or external model provider is used.
 - `npm run changeset:status -- --output <temporary-json-path>`: exited successfully and selected only pi-starship for a minor release. It also printed existing Kit-floor notices for unrelated packages; those manifests were not changed.
 
 The fenced-code-aware required-heading audit passed for all 37 publishable package READMEs. Existing Profiles navigation remains intact, including the final menu position; targeted profile integration, preview cleanup, and generated-runtime tests passed after correcting the initial menu-order regression.
 
-Separate-process `DefaultResourceLoader.reload()` samples, in milliseconds, were 401.21, 36.28, and 35.82 for the base and 42.03, 39.13, and 37.10 for the implementation. The first base sample includes a cold Jiti cache. These host-dependent samples do not establish a speed improvement or a performance threshold; the deterministic eager-graph check is the lazy-loading gate.
+For the initial implementation before the fullscreen follow-up, separate-process `DefaultResourceLoader.reload()` samples, in milliseconds, were 401.21, 36.28, and 35.82 for the base and 42.03, 39.13, and 37.10 for the implementation. The first base sample includes a cold Jiti cache. These host-dependent samples do not establish a speed improvement or a performance threshold; the deterministic eager-graph check is the lazy-loading gate.
+
+## Fullscreen follow-up audit
+
+The fullscreen workspace uses a 100%-width, 100%-height, zero-margin overlay through `ctx.ui.custom()`. Kit retains cancellation, owner checks, and disposal; the extension never hides, reorders, or takes ownership of unrelated overlays. Native tool rendering receives terminal-safe copies of tool names, IDs, arguments, paths, results, and details, without mutating the agent transcript. Incomplete streaming tool arguments are not rendered as tool cards. Tool images are disabled, so this view owns no image-conversion tasks or extra timers.
+
+| Touched MUST rules | Verification |
+| --- | --- |
+| TUI-only entry, width/height bounds, focused editor row, native editing/paste, callback chrome roles | Tests for overlay options, full-height layout, fixed preview position, zero/narrow sizes, focus, keybinding tables, paste, and theme changes |
+| Release owned UI/resources and block stale work after cancellation/disposal/replacement/shutdown | Existing lifecycle tests, disposed-render guard tests, and save/discard PTY smokes in both parent modes |
+| Sanitize terminal input before display layout and preserve model-visible history | Native-component parity and malicious tool-name/path/result tests; raw transcript equality assertions |
+| Preserve generated lazy boundaries and exact emitted relative imports | Builder eager-graph/import tests, Jiti-loader test, and independently installed tarball smokes |
+
+The final full-suite run passed. An earlier run had one intermittent failure in the unchanged `pi-codex-compact/test/context-management-runtime.test.ts` repeat-compaction case (`3 !== 4` requests). Its 13 focused tests and subsequent complete suite runs passed without modifying that package. No gate was waived.
 
 ## External handoff and release limits
 

@@ -26,7 +26,7 @@ fixture = repository / "packages/pi-starship/test/settings-chat-smoke-fixture.ts
 ansi = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
 
 
-def run(action):
+def run(action, mode):
     with tempfile.TemporaryDirectory(prefix="starship-pty-") as temporary:
         root = Path(temporary)
         agent = root / "agent"
@@ -40,7 +40,7 @@ def run(action):
         environment = dict(os.environ, PI_CODING_AGENT_DIR=str(agent), TERM="xterm-256color", NO_COLOR="1")
         child = subprocess.Popen([
             shutil.which("pi"), "--offline", "--no-session", "--no-context-files", "--no-extensions",
-            "--no-skills", "--no-prompt-templates", "--no-themes", "--no-approve", "--tui-mode", "regular",
+            "--no-skills", "--no-prompt-templates", "--no-themes", "--no-approve", "--tui-mode", mode,
             "-e", str(package), "-e", str(fixture), "--provider", "starship-smoke", "--model", "configuration-smoke",
         ], cwd=root, env=environment, stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
         os.close(slave)
@@ -120,7 +120,7 @@ def run(action):
             assert child.returncode == 0
             record = json.loads((root / "smoke-record.json").read_text())
             assert record["mainMessages"] == 0
-            print(f"PASS {action}: two draft turns, loaded skill, three tools, no parent messages, no reload, cleaned draft")
+            print(f"PASS {mode} {action}: two draft turns, loaded skill, three tools, no parent messages, no reload, cleaned draft")
         finally:
             if child.poll() is None:
                 child.terminate()
@@ -132,5 +132,6 @@ def run(action):
             os.close(master)
 
 
-run("discard")
-run("save")
+for mode in ("regular", "fullscreen"):
+    run("discard", mode)
+    run("save", mode)

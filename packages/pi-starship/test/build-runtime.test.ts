@@ -12,7 +12,7 @@ import { createTuiHarness } from "@narumitw/pi-tui-kit/testing";
 import { test } from "vitest";
 import { listFiles, registerRuntimeBuilderContract } from "../../../test/runtime-builder-contract.js";
 import { createMockContext } from "../../../test/support.js";
-import { response, testModel } from "./settings-chat-support.js";
+import { response, settingsChatCustom, testModel } from "./settings-chat-support.js";
 
 const { packageRoot, loadBuilder } = registerRuntimeBuilderContract({
   packageId: "pi-starship",
@@ -27,6 +27,7 @@ const { packageRoot, loadBuilder } = registerRuntimeBuilderContract({
     "src/command-settings-chat.ts",
     "src/settings-agent.ts",
     "src/settings-chat-ui.ts",
+    "src/settings-chat-transcript.ts",
     "src/settings-draft.ts",
     "src/presets/catalog.ts",
     "src/runtime/cloud.ts",
@@ -125,7 +126,7 @@ test("generated runtime is loadable by Pi's Jiti resource loader", async () => {
     assert.ok(extension);
     loaded.runtime.getThinkingLevel = () => "off";
     const tui = createTuiHarness({ width: 80, rows: 24 });
-    const context = createMockContext({ mode: "tui", hasUI: true, custom: tui.custom });
+    const context = createMockContext({ mode: "tui", hasUI: true, custom: settingsChatCustom(tui.custom) });
     const emit = async (name: "session_start" | "session_shutdown") => {
       const event = name === "session_start" ? { type: name, reason: "startup" } : { type: name };
       for (const handler of extension.handlers.get(name) ?? []) await handler(event, context.ctx as ExtensionContext);

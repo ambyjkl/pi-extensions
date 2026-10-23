@@ -23,6 +23,7 @@ export const { buildRuntime, validateEagerGraph, validateGeneratedFiles, publish
     "src/command-settings-chat.ts",
     "src/settings-agent.ts",
     "src/settings-chat-ui.ts",
+    "src/settings-chat-transcript.ts",
     "src/settings-draft.ts",
     "src/presets/catalog.ts",
     "src/runtime/cloud.ts",

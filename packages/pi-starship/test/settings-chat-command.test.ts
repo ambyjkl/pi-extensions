@@ -10,7 +10,7 @@ import { showSettingsAgentChat } from "../src/command-settings-chat.js";
 import { registerStarshipCommand, type StarshipCommandOptions } from "../src/commands.js";
 import { type LoadedStarshipConfig, loadStarshipConfig } from "../src/config.js";
 import { listHistory } from "../src/profile-store.js";
-import { response, testModel } from "./settings-chat-support.js";
+import { response, settingsChatCustom, testModel } from "./settings-chat-support.js";
 
 function fixture(
   original: string | null = "# retained\nformat = '$model'\n",
@@ -28,7 +28,7 @@ function fixture(
   const context = createMockContext({
     mode: "tui",
     hasUI: true,
-    custom: tui.custom,
+    custom: settingsChatCustom(tui.custom),
     model: { ...testModel, input: ["text"] },
   });
   const ctx = context.ctx as ExtensionCommandContext;

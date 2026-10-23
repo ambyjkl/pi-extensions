@@ -1,4 +1,17 @@
 import { type AssistantMessage, createAssistantMessageEventStream } from "@earendil-works/pi-ai";
+import { type ExtensionCommandContext, initTheme } from "@earendil-works/pi-coding-agent";
+
+/** Delegate rendering to the harness while retaining public overlay options as test evidence. */
+export function settingsChatCustom(
+  custom: ExtensionCommandContext["ui"]["custom"],
+  onOptions?: (options: unknown) => void,
+): ExtensionCommandContext["ui"]["custom"] {
+  initTheme("dark", false);
+  return (factory, options) => {
+    onOptions?.(options);
+    return custom(factory);
+  };
+}
 
 export const testModel = {
   id: "configuration-test",

@@ -130,7 +130,9 @@ The native editor retains editing, newline, submission, and large-paste behavior
 The configured cancel action stops an active response; when idle, it opens review actions for continuing, inspecting the full transcript or exact draft, saving, or discarding.
 Editor actions win conflicting cancel bindings, and Escape remains a review fallback unless assigned to an editor action.
 Ctrl+C discards the entire flow, including when cancellation is remapped.
-The compact chat view shows recent output; use the full conversation review for earlier or long responses.
+The fullscreen chat reuses Pi's native user, assistant, and tool message components, including Markdown, user-message backgrounds, and message spacing.
+The editor and footer preview stay at the bottom while the transcript grows above them.
+The view shows recent output with expanded, read-only tool results; use the full conversation review for earlier or long responses.
 Choose **Continue** in a document or transcript review; cancelling that review discards the flow without saving.
 
 **The agent never writes the active settings file.** Only your separate **Save and apply reviewed draft…** action, exact-document review, and confirmation publish settings, retain the previous document in History, and apply the footer without reload.

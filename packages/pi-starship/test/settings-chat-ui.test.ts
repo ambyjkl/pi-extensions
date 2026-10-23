@@ -20,7 +20,7 @@ import { test } from "vitest";
 import { createMockContext } from "../../../test/support.js";
 import { createSettingsChatComponent, settingsChatReviewInput, showSettingsChat } from "../src/settings-chat-ui.js";
 import { createSettingsDraft } from "../src/settings-draft.js";
-import { response, testModel } from "./settings-chat-support.js";
+import { response, settingsChatCustom, testModel } from "./settings-chat-support.js";
 
 function fixture(
   streamFn: ConstructorParameters<typeof Agent>[0]["streamFn"] = () =>
@@ -37,7 +37,12 @@ function fixture(
   });
   const agent = new Agent({ initialState: { model: { ...testModel, input: ["text"] }, tools: draft.tools }, streamFn });
   const tui = createTuiHarness({ rows: 32 });
-  const ctx = createMockContext({ mode: "tui", hasUI: true, custom: tui.custom }).ctx as ExtensionCommandContext;
+  const overlayOptions: unknown[] = [];
+  const ctx = createMockContext({
+    mode: "tui",
+    hasUI: true,
+    custom: settingsChatCustom(tui.custom, (options) => overlayOptions.push(options)),
+  }).ctx as ExtensionCommandContext;
   const state = { input: "", error: "" };
   const running = showSettingsChat(
     ctx,
@@ -55,6 +60,7 @@ function fixture(
     tui,
     state,
     running,
+    overlayOptions,
     async dispose() {
       controller.abort();
       tui.dispose();
@@ -67,15 +73,16 @@ function fixture(
   };
 }
 
-test("direct rendering handles zero width, callback theme changes, and read-only preview framing", async () => {
+test("fullscreen dock handles zero dimensions, callback theme changes, and read-only preview", async () => {
   const f = fixture();
   const roles: string[] = [];
   type Options = Parameters<typeof createSettingsChatComponent>[0];
+  const terminal = { rows: 40 };
   const component = createSettingsChatComponent({
     agent: f.agent,
     draft: f.draft,
     state: f.state,
-    tui: { terminal: { rows: 40 }, requestRender() {} } as Options["tui"],
+    tui: { terminal, requestRender() {} } as Options["tui"],
     theme: {
       fg: (role: string, value: string) => {
         roles.push(role);
@@ -94,14 +101,17 @@ test("direct rendering handles zero width, callback theme changes, and read-only
     assert.equal(component.focused, true);
     assert.deepEqual(component.render(0), []);
     const frame = component.render(80);
-    assert.match(frame[0], /^─+$/u);
-    assert.match(frame.at(-1) ?? "", /^─+$/u);
-    assert.ok(roles.includes("border") && roles.includes("accent") && roles.includes("muted"));
+    assert.equal(frame.length, 40);
+    assert.equal(frame.filter((line) => /^─+$/u.test(line)).length, 2);
+    assert.match(frame.at(-2) ?? "", /configuration chat/u);
+    assert.ok(roles.includes("borderMuted") && roles.includes("dim") && roles.includes("muted"));
     const calls = roles.length;
     component.invalidate();
     component.render(80);
     assert.ok(roles.length > calls);
     assert.ok(!frame.find((line) => line.includes("read-only footer"))?.includes("→"));
+    terminal.rows = 0;
+    assert.deepEqual(component.render(80), []);
   } finally {
     component.dispose();
     await component.waitForPending();
@@ -122,10 +132,14 @@ test("chat retains native editing, expanded paste, focus, bounded framing, and s
   });
   try {
     await f.tui.waitForOpen();
+    assert.deepEqual(f.overlayOptions, [
+      { overlay: true, overlayOptions: { width: "100%", maxHeight: "100%", anchor: "top-left", margin: 0 } },
+    ]);
     assert.equal(f.tui.isFocusable, true);
     f.tui.setFocused(true);
     assert.equal(f.tui.focused, true);
     assert.match(f.tui.render().join("\n"), /FOOTER PREVIEW/u);
+    const previewRow = f.tui.render().findIndex((line) => line.includes("FOOTER PREVIEW"));
     f.tui.type("abc");
     f.tui.send("\x7f");
     const paste = "line\n".repeat(40);
@@ -135,12 +149,17 @@ test("chat retains native editing, expanded paste, focus, bounded framing, and s
     assert.equal(submitted, `ab${paste}`.trim());
     assert.ok(!submitted.includes("[paste #"));
     const frame = f.tui.render();
+    assert.equal(frame.length, 32);
+    assert.equal(
+      frame.findIndex((line) => line.includes("FOOTER PREVIEW")),
+      previewRow,
+    );
     assert.ok(!frame.join("\n").includes("\x1b]52"));
     for (const rows of [4, 8, 24])
       for (const width of [1, 5, 80]) {
         f.tui.resize({ rows, width: Math.max(1, width) });
         const lines = f.tui.render(width);
-        assert.ok(lines.length <= Math.max(1, rows - 3));
+        assert.ok(lines.length <= rows);
         assert.ok(lines.every((line) => visibleWidth(line) <= width));
         if (width > 5) assert.ok(lines.some((line) => line.includes(CURSOR_MARKER)));
       }

@@ -11,11 +11,11 @@ import {
   type TUI,
   TUI_KEYBINDINGS,
   truncateToWidth,
-  wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { HorizontalRule, renderBoundedFrame, runCustomInteraction } from "@narumitw/pi-tui-kit";
 import { sanitizeTerminalDocument } from "@narumitw/pi-tui-kit/terminal-document";
 import type { WorkflowOwner } from "./command-configuration.js";
+import { createSettingsChatTranscript } from "./settings-chat-transcript.js";
 import type { SettingsDraft } from "./settings-draft.js";
 
 export interface ChatViewState {
@@ -102,6 +102,7 @@ export function createSettingsChatComponent(options: {
   };
   signal.addEventListener("abort", abort, { once: true });
   const rule = new HorizontalRule({ ruleStyle: (text) => theme.fg("border", text) });
+  const transcript = createSettingsChatTranscript(agent, tui, draft.directory);
   // Native Editor expands paste markers and clears itself before calling onSubmit.
   editor.onSubmit = (input) => {
     if (pending || signal.aborted || disposed) return;
@@ -130,8 +131,9 @@ export function createSettingsChatComponent(options: {
       editor.focused = value;
     },
     render(width: number): string[] {
-      if (width <= 0) return [];
-      const rows = Math.max(1, (Number.isFinite(tui.terminal.rows) ? tui.terminal.rows : 24) - 3);
+      if (disposed || signal.aborted || width <= 0) return [];
+      const rows = Math.max(0, Math.floor(Number.isFinite(tui.terminal.rows) ? tui.terminal.rows : 24));
+      if (rows === 0) return [];
       const input = editor.render(width);
       const cursor = Math.max(
         0,
@@ -143,33 +145,36 @@ export function createSettingsChatComponent(options: {
       )
         .split("\n")
         .slice(0, 3);
-      const transcript = settingsChatTranscript(agent)
-        .slice(-30)
-        .flatMap((text) => wrapTextWithAnsi(text, width));
-      const transcriptRows = Math.max(1, rows - input.length - preview.length - diagnostics.length - 7);
+      // Match Pi's transcript -> editor -> footer hierarchy. The fullscreen overlay
+      // covers the parent footer, so the real draft preview is part of this dock.
       const content = [
+        ...input,
+        theme.fg("muted", "Footer preview — not saved"),
         ...preview,
         ...diagnostics.map((line) => theme.fg("muted", line)),
-        ...transcript.slice(-transcriptRows),
-        ...input,
+        theme.fg("dim", "pi-starship configuration chat · preview only"),
+        theme.fg("muted", pending ? "Agent working · save unavailable" : "Cancel reviews · ctrl+c discards"),
       ];
-      const focusedRow = content.length - input.length + cursor;
-      return renderBoundedFrame({
-        width,
-        maxRows: rows,
-        rule: rule.render(width)[0] ?? "",
-        title: [theme.fg("accent", "pi-starship configuration chat — preview only")],
-        context: [
-          theme.fg("muted", pending ? "Agent working · save unavailable" : "Only the private draft is editable"),
-        ],
-        content,
-        focusedRow,
-        priorityRows: [focusedRow, ...preview.map((_, index) => index)],
-        hints: [theme.fg("dim", "Cancel stops/reviews · ctrl+c discards · review offers save and full transcript")],
-      }).map((line) => truncateToWidth(line, width, ""));
+      if (content.length > rows) {
+        return renderBoundedFrame({
+          width,
+          maxRows: rows,
+          rule: rule.render(width)[0] ?? "",
+          title: [],
+          content,
+          focusedRow: cursor,
+          priorityRows: [cursor, input.length + 1],
+        });
+      }
+      const available = rows - content.length;
+      const history = available > 0 ? transcript.render(width).slice(-available) : [];
+      return [...history, ...Array.from({ length: available - history.length }, () => ""), ...content].map((line) =>
+        truncateToWidth(line, width, ""),
+      );
     },
     invalidate() {
       editor.invalidate();
+      transcript.invalidate();
     },
     handleInput(data: string) {
       if (disposed || signal.aborted || isKeyRelease(data)) return;
@@ -195,6 +200,7 @@ export function createSettingsChatComponent(options: {
       state.input = editor.getExpandedText();
       signal.removeEventListener("abort", abort);
       unsubscribe();
+      transcript.dispose();
       agent.abort();
     },
     async waitForPending() {
@@ -212,7 +218,20 @@ export async function showSettingsChat(
   owner: WorkflowOwner,
   preview: (width: number) => string[],
 ): Promise<"review" | "discard"> {
-  const result = await runCustomInteraction<"review" | "discard">(ctx, {
+  // Keep Kit's cancellation/disposal runner, but mount through Pi's public overlay API.
+  // No second TUI, terminal handoff, or manipulation of unrelated overlay handles is needed.
+  const fullscreenContext: ExtensionCommandContext = {
+    ...ctx,
+    ui: {
+      ...ctx.ui,
+      custom: (factory) =>
+        ctx.ui.custom(factory, {
+          overlay: true,
+          overlayOptions: { width: "100%", maxHeight: "100%", anchor: "top-left", margin: 0 },
+        }),
+    },
+  };
+  const result = await runCustomInteraction<"review" | "discard">(fullscreenContext, {
     signal: owner.signal,
     isCurrent: owner.isCurrent,
     create: ({ tui, theme, keybindings, signal, complete }) =>
