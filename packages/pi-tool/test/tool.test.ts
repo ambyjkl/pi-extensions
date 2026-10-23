@@ -402,7 +402,7 @@ test("/tool toggles and persists the active-tool widget in RPC mode", async () =
   await command.handler("", { ...base, ui: { ...base.ui, ...rpc.ui } });
   rpc.assertConsumed();
   assert.deepEqual(saved, [true]);
-  assert.deepEqual(lifecycle.widgets.get("tool:active-tools"), ["Active tool (1)", "read"]);
+  assert.deepEqual(lifecycle.widgets.get("tool:active-tools"), ["Tools (1)", "Built-in (1): read"]);
   await mock.events.get("session_shutdown")?.[0]?.({}, lifecycle.ctx);
 });
 

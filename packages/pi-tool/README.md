@@ -11,7 +11,7 @@ Pi Tool lets you browse every tool configured in the current Pi session and opti
 - Displays the complete JSON parameter schema and prompt guidelines exposed by Pi.
 - Shows the effective system-prompt snippet for each active tool.
 - Refreshes metadata every time the catalog opens.
-- Optionally shows the current active tools above the editor, with the widget off by default.
+- Optionally groups active and script-callable tools by Built-in, MCP, and Extension above the editor, with the widget off by default.
 - Persists widget changes in the extension-owned `pi-tool.json` settings file.
 - Never enables, disables, or executes Pi tools.
 
@@ -85,10 +85,20 @@ Writes are ordered within one Pi process, but separate Pi processes do not share
 
 ## ℹ️ Active-tool widget
 
-When enabled, the widget shows every name returned by Pi's public `pi.getActiveTools()` API above the editor.
-It refreshes on relevant lifecycle events and polls for changes made by other extensions.
+When enabled, the widget shows active tools plus registered tools with `codemode` or `deferred` exposure above the editor.
+It groups tools in **Built-in**, **MCP**, and **Extension** order, omits empty groups, and shows a count for each group.
+MCP tools are summarized by namespace and tool count instead of listing each tool; tools without a namespace are counted under **Other**.
+For example: `MCP (88): chrome_devtools (33) · alphaxiv (25) · firecrawl (27) · Other (3)`.
+Use `/tool` to browse the full tool list.
+Built-in and Extension entries show `[codemode]` or `[deferred]` for these runtime exposures; both allow calls from codemode scripts without activation.
+Pi reports MCP tools configured as `codemode` as runtime `deferred` tools.
+Inactive `direct` and `model-only` tools are omitted, as are all `hidden` tools.
+
+Grouping uses Pi's public source metadata and MCP namespaces, not tool-name prefixes.
+MCP resource tools belong to MCP; SDK-provided tools and active names without source metadata use the Extension group.
+It refreshes on relevant lifecycle events and polls for active-tool, source, and exposure changes made by other extensions.
 It clears immediately when disabled or when the session is replaced, reloaded, or shut down.
-Tool names are sanitized and bounded before terminal rendering.
+Tool names and namespace labels are sanitized and bounded before terminal rendering.
 
 ## 🔒 Security and privacy
 

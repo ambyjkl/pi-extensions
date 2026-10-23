@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, Theme, ToolInfo } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import { stripTerminalSequences, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { afterEach, test, vi } from "vitest";
@@ -24,17 +24,36 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+function toolInfo(name: string, overrides: Partial<ToolInfo> = {}): ToolInfo {
+  return {
+    name,
+    description: name,
+    parameters: { type: "object", properties: {} },
+    exposure: "direct",
+    sourceInfo: { path: `builtin:${name}`, source: "builtin", scope: "temporary", origin: "top-level" },
+    ...overrides,
+  };
+}
+
 function createHarness(initialTools: string[] = []) {
   let activeTools = initialTools;
+  let configuredTools = initialTools.map((name) => toolInfo(name));
   const pi = {
     getActiveTools() {
       return [...activeTools];
+    },
+    getAllTools() {
+      return [...configuredTools];
     },
   } as unknown as ExtensionAPI;
   return {
     controller: createActiveToolStatusController(pi),
     setActiveTools(toolNames: string[]) {
       activeTools = toolNames;
+      configuredTools = toolNames.map((name) => toolInfo(name));
+    },
+    setConfiguredTools(tools: ToolInfo[]) {
+      configuredTools = tools;
     },
   };
 }
@@ -72,7 +91,7 @@ test("stays off by default and can start, refresh, and stop in the owned session
   harness.controller.setEnabled(current.ctx, true);
   assert.deepEqual(renderWidgetRecord(current.widgets.at(-1)), [
     ACTIVE_TOOL_WIDGET_KEY,
-    [DIVIDER, "Active tools (2)", "read · bash"],
+    [DIVIDER, "Tools (2)", "Built-in (2): read · bash"],
     { placement: "aboveEditor" },
   ]);
 
@@ -80,7 +99,7 @@ test("stays off by default and can start, refresh, and stop in the owned session
   await vi.advanceTimersByTimeAsync(ACTIVE_TOOL_REFRESH_INTERVAL_MS);
   assert.deepEqual(renderWidgetRecord(current.widgets.at(-1)), [
     ACTIVE_TOOL_WIDGET_KEY,
-    [DIVIDER, "Active tools (3)", "read · edit · write"],
+    [DIVIDER, "Tools (3)", "Built-in (3): read · edit · write"],
     { placement: "aboveEditor" },
   ]);
 
@@ -111,7 +130,7 @@ test("keeps RPC widget content as plain strings and does nothing without UI", ()
   harness.controller.start(rpc.ctx, true);
   assert.deepEqual(rpc.widgets.at(-1), [
     ACTIVE_TOOL_WIDGET_KEY,
-    ["Active tool (1)", "read"],
+    ["Tools (1)", "Built-in (1): read"],
     { placement: "aboveEditor" },
   ]);
   const print = createContext("print", false);
@@ -189,13 +208,211 @@ test("uses the callback theme after resize and invalidation without republishing
   assert.equal(current.widgets.length, writes);
 });
 
-test("formats every tool as bounded safe display text", () => {
-  assert.deepEqual(formatActiveToolWidget(["read", "bash", "edit", "write"]), [
-    "Active tools (4)",
-    "read · bash · edit · write",
+test("groups active and codemode tools in source order and counts each raw name once", () => {
+  const tools = [
+    toolInfo("deploy", {
+      sourceInfo: { path: "/extensions/deploy.ts", source: "local", scope: "user", origin: "top-level" },
+    }),
+    toolInfo("read"),
+    toolInfo("mcp__docs__search", { exposure: "codemode", namespace: { name: "mcp__docs" } }),
+    toolInfo("bash"),
+  ];
+  assert.deepEqual(formatActiveToolWidget(["deploy", "read", "bash", "read", "mcp__docs__search"], tools), [
+    "Tools (4)",
+    "Built-in (2): read · bash",
+    "MCP (1): docs (1)",
+    "Extension (1): deploy",
   ]);
-  assert.deepEqual(formatActiveToolWidget(["read\n\u001b[31m"]), ["Active tool (1)", "read31m"]);
-  assert.equal(sanitizeToolName("\u001b]8;;bad\u0007read\n\u202efile"), "8badreadfile");
+  const mcpTool = tools[2];
+  assert.ok(mcpTool);
+  assert.deepEqual(formatActiveToolWidget([], [mcpTool]), ["Tools (1)", "MCP (1): docs (1)"]);
+  assert.equal(formatActiveToolWidget([], []), undefined);
+});
+
+test.each([
+  ["direct", false, false],
+  ["direct", true, true],
+  ["model-only", false, false],
+  ["model-only", true, true],
+  ["codemode", false, true],
+  ["codemode", true, true],
+  ["deferred", false, true],
+  ["deferred", true, true],
+  ["hidden", false, false],
+  ["hidden", true, false],
+] as const)("exposure %s with active=%s has visible=%s", (exposure, active, visible) => {
+  const content = formatActiveToolWidget(active ? ["example"] : [], [toolInfo("example", { exposure })]);
+  assert.deepEqual(
+    content,
+    visible
+      ? [
+          "Tools (1)",
+          `Built-in (1): example${exposure === "codemode" || exposure === "deferred" ? ` [${exposure}]` : ""}`,
+        ]
+      : undefined,
+  );
+});
+
+test.each([
+  ["read", "builtin:read", "builtin", undefined, "Built-in"],
+  ["codemode", "builtin:codemode", "builtin", undefined, "Built-in"],
+  ["tool_search", "builtin:tool-search", "builtin", undefined, "Built-in"],
+  ["mcp__docs__search", "builtin:mcp", "builtin", "mcp__docs", "MCP"],
+  ["list_mcp_resources", "builtin:mcp", "builtin", undefined, "MCP"],
+  ["custom_search", "/extensions/adapter.ts", "local", "mcp__docs", "MCP"],
+  ["mcp__not_a_server__search", "/extensions/example.ts", "local", undefined, "Extension"],
+  ["read", "/extensions/read.ts", "npm:custom-read", undefined, "Extension"],
+  ["deploy", "/extensions/deploy.ts", "local", "deployment", "Extension"],
+  ["custom", "<sdk:custom>", "sdk", undefined, "Extension"],
+] as const)("groups %s from %s by metadata", (name, path, source, namespace, group) => {
+  const tool = toolInfo(name, {
+    sourceInfo: { path, source, scope: "temporary", origin: "top-level" },
+    ...(namespace ? { namespace: { name: namespace } } : {}),
+  });
+  const label = group === "MCP" ? `${namespace?.replace(/^mcp__/, "") ?? "Other"} (1)` : name;
+  assert.deepEqual(formatActiveToolWidget([name], [tool]), ["Tools (1)", `${group} (1): ${label}`]);
+});
+
+test.each([
+  ["codemode", "deferred"],
+  ["deferred", "deferred"],
+  ["direct", "direct"],
+  ["hidden", "hidden"],
+] as const)(
+  "shows MCP %s tools using the installed adapter's %s exposure",
+  async (configuredExposure, runtimeExposure) => {
+    // Use Pi's real adapter: MCP config exposure and public ToolInfo exposure are not equivalent.
+    const adapterPath = new URL("extensions/mcp/tools.js", import.meta.resolve("@earendil-works/pi-coding-agent")).href;
+    const { toToolExposure } = await import(adapterPath);
+    const exposure = toToolExposure(configuredExposure);
+    assert.equal(exposure, runtimeExposure);
+    const harness = createHarness(["codemode"]);
+    harness.setConfiguredTools([
+      toolInfo("codemode", { exposure: "model-only" }),
+      ...["mcp__docs__search", "list_mcp_resources"].map((name) =>
+        toolInfo(name, {
+          exposure,
+          sourceInfo: { path: "builtin:mcp", source: "builtin", scope: "temporary", origin: "top-level" },
+          ...(name === "mcp__docs__search" ? { namespace: { name: "mcp__docs" } } : {}),
+        }),
+      ),
+    ]);
+    const current = createContext("rpc");
+    try {
+      harness.controller.start(current.ctx, true);
+      assert.deepEqual(current.widgets.at(-1)?.[1], [
+        `Tools (${runtimeExposure === "deferred" ? 3 : 1})`,
+        "Built-in (1): codemode",
+        ...(runtimeExposure === "deferred" ? ["MCP (2): docs (1) · Other (1)"] : []),
+      ]);
+    } finally {
+      harness.controller.shutdown(current.ctx);
+    }
+  },
+);
+
+test("keeps active names without metadata in the Extension fallback group", () => {
+  assert.deepEqual(formatActiveToolWidget(["unknown"], []), ["Tools (1)", "Extension (1): unknown"]);
+});
+
+test("polls source and exposure changes even when the active names do not change", async () => {
+  vi.useFakeTimers();
+  const harness = createHarness(["read"]);
+  const current = createContext("rpc");
+  harness.controller.start(current.ctx, true);
+  const mcpTool = toolInfo("search", { exposure: "deferred", namespace: { name: "mcp__docs" } });
+  harness.setConfiguredTools([toolInfo("read"), mcpTool]);
+  await vi.advanceTimersByTimeAsync(ACTIVE_TOOL_REFRESH_INTERVAL_MS);
+  assert.deepEqual(current.widgets.at(-1)?.[1], ["Tools (2)", "Built-in (1): read", "MCP (1): docs (1)"]);
+  harness.setConfiguredTools([
+    toolInfo("read"),
+    { ...mcpTool, namespace: { name: "mcp__updated" } },
+    toolInfo("fetch", { exposure: "codemode", namespace: { name: "mcp__updated" } }),
+  ]);
+  await vi.advanceTimersByTimeAsync(ACTIVE_TOOL_REFRESH_INTERVAL_MS);
+  assert.deepEqual(current.widgets.at(-1)?.[1], ["Tools (3)", "Built-in (1): read", "MCP (2): updated (2)"]);
+  harness.setConfiguredTools([
+    toolInfo("read", {
+      sourceInfo: { path: "/extensions/read.ts", source: "local", scope: "user", origin: "top-level" },
+    }),
+    { ...mcpTool, exposure: "hidden" },
+  ]);
+  await vi.advanceTimersByTimeAsync(ACTIVE_TOOL_REFRESH_INTERVAL_MS);
+  assert.deepEqual(current.widgets.at(-1)?.[1], ["Tools (1)", "Extension (1): read"]);
+  harness.setConfiguredTools([toolInfo("read", { exposure: "hidden" })]);
+  await vi.advanceTimersByTimeAsync(ACTIVE_TOOL_REFRESH_INTERVAL_MS);
+  assert.equal(current.widgets.at(-1)?.[1], undefined);
+  harness.controller.shutdown(current.ctx);
+  assert.equal(vi.getTimerCount(), 0);
+});
+
+test("summarizes a large MCP catalog without listing tool names or repeated exposure markers", () => {
+  const tools = [
+    toolInfo("read"),
+    ...Array.from({ length: 33 }, (_, index) =>
+      toolInfo(`mcp__chrome_devtools__tool_${index}`, {
+        exposure: "deferred",
+        namespace: { name: "mcp__chrome_devtools" },
+      }),
+    ),
+    ...Array.from({ length: 25 }, (_, index) =>
+      toolInfo(`mcp__alphaxiv__tool_${index}`, { exposure: "codemode", namespace: { name: "mcp__alphaxiv" } }),
+    ),
+    ...Array.from({ length: 27 }, (_, index) =>
+      toolInfo(`mcp__firecrawl__tool_${index}`, { exposure: "deferred", namespace: { name: "mcp__firecrawl" } }),
+    ),
+    ...["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"].map((name) =>
+      toolInfo(name, {
+        exposure: "deferred",
+        sourceInfo: { path: "builtin:mcp", source: "builtin", scope: "temporary", origin: "top-level" },
+      }),
+    ),
+    toolInfo("hidden", { exposure: "hidden", namespace: { name: "mcp__chrome_devtools" } }),
+    toolInfo("inactive", { namespace: { name: "mcp__chrome_devtools" } }),
+  ];
+  const body = formatActiveToolWidget(["read", "mcp__chrome_devtools__tool_0"], tools);
+  assert.deepEqual(body, [
+    "Tools (89)",
+    "Built-in (1): read",
+    "MCP (88): chrome_devtools (33) · alphaxiv (25) · firecrawl (27) · Other (3)",
+  ]);
+  assert.equal(renderActiveToolWidget(body, IDENTITY_THEME, 80).length, 4);
+});
+
+test("sanitizes MCP namespace labels without changing their raw metadata", () => {
+  const namespace = "mcp__\u001b[31mdocs\n\u001b[0m";
+  const tools = [toolInfo("search", { exposure: "deferred", namespace: { name: namespace } })];
+  assert.deepEqual(formatActiveToolWidget([], tools), ["Tools (1)", "MCP (1): docs (1)"]);
+  assert.equal(tools[0]?.namespace?.name, namespace);
+});
+
+test("renders grouped codemode content safely at zero, narrow, and wide widths", () => {
+  const body = formatActiveToolWidget(
+    ["read", "界界"],
+    [toolInfo("read"), toolInfo("界界", { namespace: { name: "mcp__docs" }, exposure: "codemode" })],
+  );
+  assert.ok(body);
+  for (const width of [0, 1, 2, 12, 40, 80]) {
+    const lines = renderActiveToolWidget(body, IDENTITY_THEME, width);
+    assert.equal(lines[0], "─".repeat(width));
+    assert.ok(lines.every((line) => visibleWidth(line) <= width));
+  }
+});
+
+test("formats every tool as bounded safe display text without changing raw names", () => {
+  const names = ["read", "bash", "edit", "write"];
+  assert.deepEqual(
+    formatActiveToolWidget(
+      names,
+      names.map((name) => toolInfo(name)),
+    ),
+    ["Tools (4)", "Built-in (4): read · bash · edit · write"],
+  );
+  const rawName = "read\n\u001b[31m";
+  const tool = toolInfo(rawName, { exposure: "codemode" });
+  assert.deepEqual(formatActiveToolWidget([], [tool]), ["Tools (1)", "Built-in (1): read [codemode]"]);
+  assert.equal(tool.name, rawName);
+  assert.equal(sanitizeToolName("\u001b]8;;bad\u0007read\n\u202efile"), "readfile");
   assert.equal(sanitizeToolName("\u001b\u0007"), "tool");
   assert.equal(sanitizeToolName("x".repeat(40)), `${"x".repeat(32)}…`);
 });
