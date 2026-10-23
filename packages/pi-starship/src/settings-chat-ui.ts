@@ -23,6 +23,24 @@ export interface ChatViewState {
   error: string;
 }
 
+/** Use the same full-width preview boundary in the conversation and review menu. */
+export function renderSettingsChatPreview(
+  width: number,
+  preview: readonly string[],
+  theme: Pick<Theme, "fg">,
+): string[] {
+  if (width <= 0) return [];
+  const ruleStyle = (text: string) => theme.fg("border", text);
+  const top = new HorizontalRule({
+    label: "Footer preview — not saved",
+    labelAlignment: "left",
+    ruleStyle,
+    labelStyle: (text) => theme.fg("muted", text),
+  });
+  const bottom = new HorizontalRule({ ruleStyle });
+  return [top.render(width)[0] ?? "", ...preview, bottom.render(width)[0] ?? ""];
+}
+
 /** Editor actions win collisions. Escape remains a review fallback for unusable cancel settings. */
 export function settingsChatReviewInput(data: string, keybindings: Pick<KeybindingsManager, "matches">): boolean {
   const editorKeys = getKeybindings();
@@ -102,12 +120,6 @@ export function createSettingsChatComponent(options: {
   };
   signal.addEventListener("abort", abort, { once: true });
   const rule = new HorizontalRule({ ruleStyle: (text) => theme.fg("border", text) });
-  const previewRule = new HorizontalRule({
-    label: "Footer preview — not saved",
-    labelAlignment: "left",
-    ruleStyle: (text) => theme.fg("border", text),
-    labelStyle: (text) => theme.fg("muted", text),
-  });
   const transcript = createSettingsChatTranscript(agent, tui, draft.directory);
   // Native Editor expands paste markers and clears itself before calling onSubmit.
   editor.onSubmit = (input) => {
@@ -160,7 +172,7 @@ export function createSettingsChatComponent(options: {
       ];
       // Horizontal boundaries preserve the statusline's full responsive render width.
       // Never show a preview with missing boundaries; optional chrome yields first.
-      const previewFrame = [previewRule.render(width)[0] ?? "", ...preview, rule.render(width)[0] ?? ""];
+      const previewFrame = renderSettingsChatPreview(width, preview, theme);
       if (input.length + previewFrame.length > rows) {
         return renderBoundedFrame({
           width,

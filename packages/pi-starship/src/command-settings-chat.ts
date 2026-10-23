@@ -7,7 +7,12 @@ import type { WorkflowOwner } from "./command-configuration.js";
 import { showPreviewActionMenu } from "./command-preview.js";
 import type { StarshipCommandOptions } from "./commands.js";
 import { createSettingsAgent, starshipPackageRoot } from "./settings-agent.js";
-import { type ChatViewState, settingsChatTranscript, showSettingsChat } from "./settings-chat-ui.js";
+import {
+  type ChatViewState,
+  renderSettingsChatPreview,
+  settingsChatTranscript,
+  showSettingsChat,
+} from "./settings-chat-ui.js";
 import { createSettingsDraft } from "./settings-draft.js";
 
 export async function showSettingsAgentChat(
@@ -72,10 +77,10 @@ export async function showSettingsAgentChat(
       const result = await showPreviewActionMenu(
         ctx,
         "Configuration chat — preview only",
-        (width) => [
+        (width, theme) => [
           "The agent has not changed the active settings file.",
           "Preview uses cached data; enabling modules here does not run commands or network requests.",
-          ...preview(width),
+          ...renderSettingsChatPreview(width, preview(width), theme),
           ...sanitizeTerminalDocument(draft.diagnostics).split("\n"),
         ],
         [
