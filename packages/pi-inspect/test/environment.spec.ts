@@ -23,10 +23,10 @@ test.beforeEach(async () => {
 });
 test.afterEach(async () => server.close());
 const tab = (page: Page, name: string) => page.getByRole("tab", { name, exact: true });
-const resource = (page: Page) => page.locator(".resource-panel:not([hidden])");
+const resource = (page: Page) => page.locator(".environment-surface:not([hidden]) .resource-panel");
 
 for (const width of [1672, 1115, 900, 375]) {
-  test(`two navigation levels, resource state and safe rendering at ${width}px`, async ({ page }) => {
+  test(`top-level resource tabs, retained state and safe rendering at ${width}px`, async ({ page }) => {
     const errors: string[] = [];
     const external: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
@@ -44,21 +44,38 @@ for (const width of [1672, 1115, 900, 375]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto(server.url);
     const primary = page.getByRole("tablist", { name: "Inspection source" });
-    await expect(primary.getByRole("tab")).toHaveText(["Context", "Session", "Cache", "Environment"]);
+    await expect(primary.getByRole("tab")).toHaveText([
+      "Context",
+      "Session",
+      "Cache",
+      "Tools",
+      "MCP Servers",
+      "Skills",
+    ]);
+    await expect(tab(page, "Environment")).toHaveCount(0);
+    await expect(page.getByRole("tablist", { name: "Environment resources" })).toHaveCount(0);
+    for (const button of await primary.getByRole("tab").all()) {
+      const panelId = await button.getAttribute("aria-controls");
+      const panel = page.locator(`#${panelId}`);
+      await expect(panel).toHaveCount(1);
+      await expect(panel).toHaveAttribute("role", "tabpanel");
+      await expect(panel).toHaveAttribute("aria-labelledby", (await button.getAttribute("id")) ?? "");
+    }
     const header = await page.locator(".app-header").boundingBox();
     const tabs = await primary.boundingBox();
     expect(tabs?.y).toBeGreaterThanOrEqual((header?.y ?? 0) + (header?.height ?? 0));
     await expect(page.locator(".environment-surface .inventory-card")).toHaveCount(0);
     await tab(page, "Context").focus();
     await page.keyboard.press("End");
-    await expect(tab(page, "Environment")).toBeFocused();
-    await expect(tab(page, "Environment")).toHaveAttribute("aria-selected", "true");
+    await expect(tab(page, "Skills")).toBeFocused();
+    await expect(tab(page, "Skills")).toHaveAttribute("aria-selected", "true");
+    await expect(page.locator("#resource-panel-tools, #resource-panel-mcp")).toHaveCount(0);
     await page.keyboard.press("ArrowRight");
     await expect(tab(page, "Context")).toBeFocused();
     await page.keyboard.press("ArrowLeft");
-    await expect(tab(page, "Environment")).toBeFocused();
-    const secondary = page.getByRole("tablist", { name: "Environment resources" });
-    await expect(secondary.getByRole("tab")).toHaveText(["Tools", "MCP Servers", "Skills"]);
+    await expect(tab(page, "Skills")).toBeFocused();
+    await tab(page, "Tools").click();
+    await expect(page.getByRole("tabpanel", { name: "Tools", exact: true })).toBeVisible();
     await expect(resource(page)).toContainText("active ≠ provider-visible");
     await page.getByRole("button", { name: `Inspect ${value.tools[0]?.name}`, exact: true }).click();
     const details =
@@ -73,14 +90,14 @@ for (const width of [1672, 1115, 900, 375]) {
     await tab(page, "Tools").focus();
     await page.keyboard.press("ArrowRight");
     await expect(tab(page, "MCP Servers")).toBeFocused();
-    await expect(tab(page, "Environment")).toHaveAttribute("aria-selected", "true");
+    await expect(primary.getByRole("tab", { selected: true })).toHaveText("MCP Servers");
     await expect(resource(page)).toContainText("registered-with-no-tools");
     await expect(resource(page)).toContainText("Connection status: unavailable");
     await expect(resource(page)).not.toContainText("mcp__docs__search");
     await page.keyboard.press("End");
     await expect(tab(page, "Skills")).toBeFocused();
     await page.keyboard.press("Home");
-    await expect(tab(page, "Tools")).toBeFocused();
+    await expect(tab(page, "Context")).toBeFocused();
     await page.keyboard.press("ArrowLeft");
     await expect(tab(page, "Skills")).toBeFocused();
     await expect(resource(page)).toContainText("Skill content unavailable");
@@ -89,7 +106,7 @@ for (const width of [1672, 1115, 900, 375]) {
     await tab(page, "Session").click();
     await expect(page.getByRole("textbox", { name: "Search session" })).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(0);
-    await tab(page, "Environment").click();
+    await tab(page, "Skills").click();
     await expect(tab(page, "Skills")).toHaveAttribute("aria-selected", "true");
     await expect(resource(page).getByRole("button", { name: "Path · example", exact: true })).toHaveAttribute(
       "aria-expanded",
@@ -112,6 +129,49 @@ for (const width of [1672, 1115, 900, 375]) {
   });
 }
 
+test("direct resource visits mount only their own catalog and retain independent scroll and disclosures", async ({
+  page,
+}) => {
+  const skill = skills[0];
+  if (!skill) throw Error("Missing skill fixture");
+  value.mcp = {
+    servers: Array.from({ length: 48 }, (_, index) => ({ name: `server-${index}`, truncated: false })),
+    truncated: false,
+  };
+  value.skills = Array.from({ length: 48 }, (_, index) => ({
+    ...skill,
+    name: `skill-${index}`,
+    path: `/skills/skill-${index}/SKILL.md`,
+  }));
+  await page.setViewportSize({ width: 900, height: 812 });
+  await page.goto(server.url);
+  await tab(page, "MCP Servers").click();
+  await expect(page.locator("#resource-panel-mcp .inventory-card")).toHaveCount(48);
+  await expect(page.locator("#resource-panel-tools, #resource-panel-skills")).toHaveCount(0);
+  const mcp = page.locator("#resource-panel-mcp");
+  await mcp.evaluate((element) => {
+    element.scrollTop = 240;
+  });
+  const mcpTop = await mcp.evaluate((element) => element.scrollTop);
+  expect(mcpTop).toBeGreaterThan(0);
+  await tab(page, "Skills").click();
+  const skillPanel = page.locator("#resource-panel-skills");
+  const path = skillPanel.getByRole("button", { name: "Path · skill-0", exact: true });
+  await path.click();
+  await skillPanel.evaluate((element) => {
+    element.scrollTop = 360;
+  });
+  const skillTop = await skillPanel.evaluate((element) => element.scrollTop);
+  expect(skillTop).toBeGreaterThan(0);
+  await tab(page, "MCP Servers").click();
+  await expect(mcp).toHaveJSProperty("scrollTop", mcpTop);
+  await tab(page, "Context").click();
+  await tab(page, "Skills").click();
+  await expect(skillPanel).toHaveJSProperty("scrollTop", skillTop);
+  await expect(path).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator("#resource-panel-tools")).toHaveCount(0);
+});
+
 for (const width of [320, 375, 900, 1672]) {
   test(`compact resource layout, readable themes and keyboard disclosures at ${width}px`, async ({ page, context }) => {
     const tool = value.tools[0];
@@ -130,7 +190,7 @@ for (const width of [320, 375, 900, 1672]) {
     await page.setViewportSize({ width, height: 812 });
     await page.goto(server.url);
     await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: server.origin });
-    await tab(page, "Environment").click();
+    await tab(page, "Tools").click();
     const panel = resource(page);
     const inspect = panel.getByRole("button", { name: "Inspect inspect_session_0", exact: true });
     const card =
@@ -168,25 +228,15 @@ for (const width of [320, 375, 900, 1672]) {
         "background-color",
         appearance === "light" ? "rgb(238, 235, 228)" : "rgb(46, 50, 55)",
       );
-      const secondary = page.getByRole("tablist", { name: "Environment resources" });
       await page.keyboard.press("Tab");
-      for (const [selected, other] of [
-        [primary.getByRole("tab", { name: "Environment" }), primary.getByRole("tab", { name: "Context" })],
-        [secondary.getByRole("tab", { name: "Tools", exact: true }), secondary.getByRole("tab", { name: "Skills" })],
-      ] as const) {
-        expect(await selected.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe(
-          await other.evaluate((element) => getComputedStyle(element).backgroundColor),
-        );
-        await selected.focus();
-        await expect(selected).toHaveCSS("outline-style", "solid");
-        await expect(selected).toHaveCSS("outline-width", "2px");
-      }
-      const inactiveTab = secondary.getByRole("tab", { name: "Skills" });
-      const idleBackground = await inactiveTab.evaluate((element) => getComputedStyle(element).backgroundColor);
-      await inactiveTab.hover();
-      expect(await inactiveTab.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe(
-        idleBackground,
+      const selected = primary.getByRole("tab", { name: "Tools", exact: true });
+      const other = primary.getByRole("tab", { name: "Context", exact: true });
+      expect(await selected.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe(
+        await other.evaluate((element) => getComputedStyle(element).backgroundColor),
       );
+      await selected.focus();
+      await expect(selected).toHaveCSS("outline-style", "solid");
+      await expect(selected).toHaveCSS("outline-width", "2px");
       if (width > 680) {
         await expect(page.getByText("Read-only", { exact: true })).toBeVisible();
         await expect(page.locator(".app-footer span").last()).toBeVisible();
@@ -329,7 +379,7 @@ test("empty, partial, duplicate and unavailable resource catalogs never imply mi
   value.skills = [];
   value.mcp = { servers: [], truncated: false };
   await page.goto(server.url);
-  await tab(page, "Environment").click();
+  await tab(page, "Tools").click();
   await expect(resource(page)).toContainText("No tools in this snapshot");
   await tab(page, "MCP Servers").click();
   await expect(resource(page)).toContainText("This does not mean no MCP servers exist");
@@ -344,7 +394,7 @@ test("empty, partial, duplicate and unavailable resource catalogs never imply mi
     mcp: { servers: [], truncated: false, unavailable: true },
   };
   server.invalidate(1);
-  await expect(page.locator(".environment-heading")).toContainText("Snapshot incomplete");
+  await expect(page.locator(".environment-heading:visible")).toContainText("Snapshot incomplete");
   await expect(resource(page).locator(".inventory-card")).toHaveCount(2);
   await expect(resource(page)).toContainText("not verified file availability");
   await tab(page, "MCP Servers").click();
@@ -361,14 +411,14 @@ test("empty, partial, duplicate and unavailable resource catalogs never imply mi
 test("loading and terminal errors leave resource availability explicit", async ({ page }) => {
   await page.route("**/api/snapshot?**", (route) => route.fulfill({ status: 409, body: "Changed" }));
   await page.goto(server.url);
-  await tab(page, "Environment").click();
+  await tab(page, "Tools").click();
   await expect(page.getByText("Session expired; open a new viewer from Pi.", { exact: true })).toBeVisible();
-  await expect(page.locator(".environment-heading")).toContainText("Resource inventory unavailable");
+  await expect(page.locator(".environment-heading:visible")).toContainText("Resource inventory unavailable");
   await tab(page, "MCP Servers").click();
   await expect(resource(page)).toContainText("complete configured server catalog is unavailable");
 });
 
-test("Environment exit cancels pending event work; desktop and drawer share one selection", async ({ page }) => {
+test("resource navigation cancels pending event work; desktop and drawer share one selection", async ({ page }) => {
   let release: () => void = () => {};
   let ready: () => void = () => {};
   const gate = new Promise<void>((resolve) => {
@@ -389,7 +439,7 @@ test("Environment exit cancels pending event work; desktop and drawer share one 
     await tab(page, "Session").click();
     await page.locator(`.session-primary:not([hidden]) [data-trace-id="${f.user}"]`).click();
     await admitted;
-    await tab(page, "Environment").click();
+    await tab(page, "Tools").click();
     release();
     await aborted;
     await expect(page.locator(".inspector-panel")).toHaveCount(0);
@@ -402,7 +452,7 @@ test("Environment exit cancels pending event work; desktop and drawer share one 
     await expect(page.locator(".inspector-panel")).toHaveCount(1);
     await page.keyboard.press("Escape");
     await expect(page.getByRole("button", { name: "Toggle event details" })).toBeFocused();
-    await tab(page, "Environment").click();
+    await tab(page, "Skills").click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await tab(page, "Session").click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
