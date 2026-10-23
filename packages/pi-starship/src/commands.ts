@@ -38,6 +38,7 @@ const MAIN_ACTIONS = {
   help: "help",
   restore: "restore",
   profiles: "profiles",
+  chat: "settings-chat",
 } as const;
 
 const PREVIEW_ACTIONS = {
@@ -55,6 +56,7 @@ export interface StarshipCommandOptions extends ConfigurationCommandOptions, Com
   validate?: (settingsPath: string, rawDocument: string) => LoadedStarshipConfig;
   getMenuOwner?(): WorkflowOwner;
   gistApi?: GhApi;
+  registerChatCleanup?(cleanup: () => Promise<void>): () => void;
 }
 
 export type ReviewIntent =
@@ -170,7 +172,8 @@ async function showMainMenu(ctx: ExtensionCommandContext, options: StarshipComma
     | "configuration-reload"
     | "restore"
     | "gist-share"
-    | "gist-import";
+    | "gist-import"
+    | "settings-chat";
   const menu = defineMenu<undefined, Screen, Action, ExtensionCommandContext>({
     start: "main",
     screens: {
@@ -185,7 +188,7 @@ async function showMainMenu(ctx: ExtensionCommandContext, options: StarshipComma
             {
               id: MAIN_ACTIONS.customize,
               label: "Customize footer",
-              description: `${presentation.state} · preview before applying`,
+              description: `${presentation.state} · ${presentation.health} · preview before applying`,
               action: "customize",
             },
             {
@@ -224,6 +227,12 @@ async function showMainMenu(ctx: ExtensionCommandContext, options: StarshipComma
               description: presentation.restoreDescription,
               disabled: presentation.restoreDisabled,
               action: "restore",
+            },
+            {
+              id: MAIN_ACTIONS.chat,
+              label: "Configure with agent…",
+              description: "Separate conversation · draft tools · live preview only until you save",
+              action: "settings-chat",
             },
             {
               id: MAIN_ACTIONS.profiles,
@@ -279,6 +288,7 @@ async function showMainMenu(ctx: ExtensionCommandContext, options: StarshipComma
         title: "pi-starship help",
         lines: [
           "Customize footer opens the TOML editor, then previews and confirms before saving.",
+          "Configure with agent opens a separate skill-backed chat; edits preview only until you explicitly save.",
           "Presets live-previews the cursor in the footer; Enter confirms apply, e customizes, and s saves a profile when available.",
           "Profiles manages named TOML copies; selecting a document previews it without saving.",
           "Configuration History reviews and restores recovery copies; external edits are not fully tracked.",
@@ -292,6 +302,12 @@ async function showMainMenu(ctx: ExtensionCommandContext, options: StarshipComma
       }),
     },
     actions: {
+      "settings-chat": async () => {
+        const { showSettingsAgentChat } = await import("./command-settings-chat.js");
+        if (!isCurrentOwner(owner)) return { kind: "close" };
+        await showSettingsAgentChat(ctx, options, owner);
+        return { kind: "close" };
+      },
       customize: async () => {
         const result = await editSettings(ctx, options);
         return result === "applied" || result === "close" ? { kind: "close" } : { kind: "stay" };

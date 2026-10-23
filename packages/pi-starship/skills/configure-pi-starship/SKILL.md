@@ -9,6 +9,19 @@ disable-model-invocation: true
 
 Answer pi-starship configuration questions or make the requested `pi-starship.toml` change.
 
+## Hosted preview-only chat
+
+When the host explicitly supplies an owned draft path and identifies this as the hosted preview-only workflow, use this section instead of the standalone path-resolution and publication steps below.
+Read and edit only that draft for configuration changes; never write or edit the active settings file.
+The host provides `read`, `write`, and `edit`, validates each completed mutation, and updates the footer preview without `/reload`.
+Read the relevant bundled references using their paths relative to this skill directory.
+Use `read` before `edit`, preserve comments and unknown fields, and repair errors reported by the host.
+A rejected preview can leave invalid text in the draft; fix that text rather than assuming the write was rolled back.
+Do not run or request the resolver, validator, backup, or apply scripts in this workflow.
+Do not request shell access, publish settings, or tell the user that settings were saved.
+Only the user can choose the host's separate save-and-apply action after review.
+Closing or discarding the preview does not save it.
+
 ## Choose the task path
 
 For a configuration question, load only the smallest relevant reference and answer with the exact supported names, values, defaults, and behavior.

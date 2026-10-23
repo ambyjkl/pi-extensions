@@ -18,6 +18,7 @@ The extension parses and renders the footer itself, so it does not need the `sta
 - Wraps native multiline layouts to terminal width instead of truncating them.
 - Keeps rendering pure while refreshing filesystem, process, and network-derived data through bounded caches.
 - Uses `/starship` for named TOML profiles, live previews, presets, customization, and recovery history.
+- Offers a separate configuration chat with the bundled skill and draft-only file tools; valid edits preview immediately without reload.
 - Shares settings through unlisted GitHub Gists and reviews imported settings before replacement.
 - Bundles the authoritative configuration skill and references for editing `pi-starship.toml` or answering setup questions.
 - Loads a generated split runtime to reduce Pi package startup work.
@@ -60,6 +61,7 @@ Run `/skill:configure-pi-starship` before asking Pi to explain or edit `pi-stars
 
 The skill was renamed from `configuring-pi-starship`; use `/skill:configure-pi-starship` instead of the old invocation.
 The skill loads the relevant reference and validates file edits.
+For a separate preview-only conversation, open `/starship` → **Configure with agent…** instead.
 It does not cover general TOML, shell Starship configuration, extension source development, or unrelated footer work.
 
 ## 💬 Commands
@@ -110,6 +112,36 @@ Manual file edits load at the next `session_start`, including `/reload`.
 Existing defaults and the built-in footer remain unchanged.
 Module references cover bounded regex substitutions/context rules, component version formats, Git templates/controls, clock zones/ranges, Python argv alternatives, environment detectors, requirement styling, and private-package visibility.
 The six Jujutsu/system modules require explicit `disabled = false` plus a root reference or `$all`; see [module behavior](./skills/configure-pi-starship/references/modules.md#jujutsu-modules).
+
+## 🧠 Configuration chat
+
+Open `/starship` → **Configure with agent…** to adjust the footer in a separate, temporary conversation.
+The agent explicitly loads `configure-pi-starship` and uses the model and thinking level selected when the chat opens, through Pi's current provider authentication.
+The main conversation, tools, and model selection are unchanged; the chat is not persisted and has no automatic compaction or retry workflow.
+Its usage is separate from the main session's usage totals.
+
+The agent has `read`, `write`, and `edit`, but no shell tool.
+Reads are limited to an immutable settings snapshot, the private draft, and bundled configuration skill/source documents; writes and edits can change only the private draft, limited to 64 KiB.
+Each valid edit updates the footer preview immediately, without `/reload`; an invalid edit returns diagnostics and retains the last valid preview until repaired.
+Previews use cached runtime data and do not start module commands or network requests.
+These tool limits are not an operating-system sandbox for extension code.
+
+The native editor retains editing, newline, submission, and large-paste behavior.
+The configured cancel action stops an active response; when idle, it opens review actions for continuing, inspecting the full transcript or exact draft, saving, or discarding.
+Editor actions win conflicting cancel bindings, and Escape remains a review fallback unless assigned to an editor action.
+Ctrl+C discards the entire flow, including when cancellation is remapped.
+The compact chat view shows recent output; use the full conversation review for earlier or long responses.
+Choose **Continue** in a document or transcript review; cancelling that review discards the flow without saving.
+
+**The agent never writes the active settings file.** Only your separate **Save and apply reviewed draft…** action, exact-document review, and confirmation publish settings, retain the previous document in History, and apply the footer without reload.
+Applying can start enabled module commands and network requests; review those settings first.
+Closing, discarding, session replacement, or shutdown removes the temporary draft without saving.
+Detected changes to disk or loaded settings block stale publication; this is not a cross-process lock.
+Saving a repair of an invalid original document requires an explicit repair warning in the confirmation.
+
+Your chat input, settings read by the agent, local paths, and tool results are sent to the selected model provider.
+Do not include secrets in the draft or conversation.
+This flow requires TUI mode and a model whose provider supports normal tool calls; it does not load parent extensions, project instructions, MCP tools, or the main transcript into the child.
 
 ## 🗃️ Profiles and history
 

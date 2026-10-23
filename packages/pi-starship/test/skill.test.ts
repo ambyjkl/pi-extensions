@@ -75,6 +75,22 @@ test("package bundles one focused pi-starship configuration skill", async () => 
   }
 });
 
+test("hosted skill workflow uses draft tools without changing the standalone publication contract", () => {
+  const skill = readFileSync(path.join(skillDirectory, "SKILL.md"), "utf8");
+  const hosted = skill.split("## Hosted preview-only chat\n")[1]?.split("## Choose the task path")[0] ?? "";
+  for (const rule of [
+    "never write or edit the active settings file",
+    "`read`, `write`, and `edit`",
+    "without `/reload`",
+    "Do not run or request the resolver",
+    "Only the user can choose",
+    "Closing or discarding the preview does not save it",
+  ])
+    assert.ok(hosted.includes(rule));
+  assert.ok(skill.includes('node "$skill_dir/scripts/apply.mjs"'));
+  assert.ok(skill.includes('node "$skill_dir/scripts/validate.mjs"'));
+});
+
 test("skill answers from references or source and edits configuration safely", () => {
   const skill = readFileSync(path.join(skillDirectory, "SKILL.md"), "utf8");
   for (const contract of [
