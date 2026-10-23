@@ -1,4 +1,5 @@
 import type { ToolGroup, ToolView } from "../model.js";
+import { boundedSearch } from "./search.js";
 
 export type InventoryGrouping = "namespace" | "source" | "exposure";
 export interface InventoryRow {
@@ -47,6 +48,15 @@ export function inventoryGroups(rows: InventoryRow[]): { group: ToolGroup; count
   return [...groups.values()].sort((a, b) => a.group.label.localeCompare(b.group.label));
 }
 
+/** Compact display only: full sanitized provenance and opaque identities remain unchanged. */
+export function compactGroupLabel(group: ToolGroup): string {
+  const label = boundedSearch(group.label);
+  const path = group.kind === "extension" || (group.kind === "package" && /^(?:[/\\\\]|[A-Za-z]:[/\\\\])/.test(label));
+  if (!path) return label;
+  const parts = label.split(/[/\\\\]/).filter(Boolean);
+  return parts.length > 3 ? `…/${parts.slice(-3).join("/")}` : label;
+}
+
 export function toolCell(tool: ToolView, column: ToolColumn): string {
   switch (column) {
     case "exposure":
@@ -56,7 +66,7 @@ export function toolCell(tool: ToolView, column: ToolColumn): string {
     case "active":
       return tool.active ? "Yes" : "No";
     case "source":
-      return tool.sourceGroup?.label ?? "Unknown source";
+      return tool.sourceGroup ? compactGroupLabel(tool.sourceGroup) : "Unknown source";
     case "namespace":
       return tool.namespace ?? "Unavailable";
     case "description":

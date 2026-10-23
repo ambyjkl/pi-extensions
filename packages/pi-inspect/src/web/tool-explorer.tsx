@@ -1,13 +1,14 @@
 import { Cross2Icon } from "@radix-ui/react-icons";
-import { Badge, Heading, IconButton } from "@radix-ui/themes";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Badge, Heading, IconButton, Popover } from "@radix-ui/themes";
+import { type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ToolView } from "../model.js";
-import { Data, Metadata } from "./components.js";
+import { Data, type DataState, Metadata } from "./components.js";
 import { NavigationTabs } from "./navigation-tabs.js";
 import { PaneDrawer, useNarrow } from "./panes.js";
 import { boundedSearch, searchNeedle } from "./search.js";
 import { ParameterSchema } from "./tool-inspector.js";
 import {
+  compactGroupLabel,
   type InventoryGrouping,
   type InventoryRow,
   inventoryGroups,
@@ -26,10 +27,46 @@ const detailTabs = [
   { value: "source", label: "Source" },
 ] as const;
 
-function ToolDetails({ tool }: { tool: ToolView }) {
-  const [tab, setTab] = useState<(typeof detailTabs)[number]["value"]>("overview");
+type DetailTab = (typeof detailTabs)[number]["value"];
+interface DetailReading {
+  tab: DetailTab;
+  schema: DataState;
+  source: DataState;
+}
+function initialReading(): DetailReading {
+  return { tab: "overview", schema: { open: false, format: "tree" }, source: { open: false, format: "tree" } };
+}
+function ToolDetails({
+  tool,
+  reading,
+  change,
+  scroll,
+  parameterExpansion,
+  scope,
+}: {
+  tool: ToolView;
+  reading: DetailReading;
+  change(reading: DetailReading): void;
+  scroll: RefObject<number>;
+  parameterExpansion: Map<string, boolean>;
+  scope: string;
+}) {
+  const { tab } = reading;
+  const content = useRef<HTMLDivElement>(null);
+  const previousTab = useRef(tab);
+  useLayoutEffect(() => {
+    if (previousTab.current !== tab) scroll.current = 0;
+    previousTab.current = tab;
+    if (content.current) content.current.scrollTop = scroll.current;
+  }, [scroll, tab]);
   return (
-    <div className="tool-detail-content">
+    <div
+      className="tool-detail-content"
+      ref={content}
+      onScroll={(event) => {
+        scroll.current = event.currentTarget.scrollTop;
+      }}
+    >
       <Heading size="3">{tool.name}</Heading>
       <div className="tool-badges">
         <Badge highContrast color="gray">
@@ -48,7 +85,13 @@ function ToolDetails({ tool }: { tool: ToolView }) {
         label="Tool detail sections"
         tabs={detailTabs}
         value={tab}
-        change={(value) => setTab(value as typeof tab)}
+        change={(value) => {
+          change({
+            ...reading,
+            tab: value as DetailTab,
+            source: value === "source" ? { ...reading.source, open: true } : reading.source,
+          });
+        }}
       />
       <section key={tab} role="tabpanel" id={`tool-detail-panel-${tab}`} aria-labelledby={`tool-detail-tab-${tab}`}>
         {tab === "overview" && (
@@ -72,14 +115,28 @@ function ToolDetails({ tool }: { tool: ToolView }) {
             {tool.schema.truncated && (
               <p role="status">Captured schema truncated; parameter documentation may be partial.</p>
             )}
-            <ParameterSchema value={tool.schema.value} />
+            <ParameterSchema value={tool.schema.value} expansion={parameterExpansion} />
           </>
         )}
         {(tab === "overview" || tab === "source") && (
-          <Data key="source" label={`Source · ${tool.name}`} data={tool.source} defaultOpen={tab === "source"} />
+          <Data
+            key="source"
+            scope={`${scope}:source`}
+            label={`Source · ${tool.name}`}
+            data={tool.source}
+            state={reading.source}
+            changeState={(source) => change({ ...reading, source })}
+          />
         )}
         {tab !== "source" && (
-          <Data key="schema" label={`Schema · ${tool.name}`} data={tool.schema} defaultOpen={false} />
+          <Data
+            key="schema"
+            scope={`${scope}:schema`}
+            label={`Schema · ${tool.name}`}
+            data={tool.schema}
+            state={reading.schema}
+            changeState={(schema) => change({ ...reading, schema })}
+          />
         )}
       </section>
     </div>
@@ -133,7 +190,7 @@ function SourceNavigation({
                 onClick={() => change(group.id)}
               >
                 <span>
-                  {group.label}
+                  {compactGroupLabel(group)}
                   {group.truncated && " · truncated"}
                 </span>
                 <span className="tool-count">{count}</span>
@@ -157,10 +214,17 @@ export function ToolExplorer({ tools, active }: { tools: ToolView[]; active: boo
   const [selected, setSelected] = useState<string>();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [columnsOpen, setColumnsOpen] = useState(false);
+  const [reading, setReading] = useState<DetailReading>(initialReading);
+  const detailScroll = useRef(0);
+  const parameterExpansion = useRef(new Map<string, boolean>());
+  const activeOwner = useRef(active);
+  activeOwner.current = active;
+  const pendingDetailFocus = useRef(false);
+  const reopenTrigger = useRef<HTMLButtonElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const sourceTrigger = useRef<HTMLButtonElement>(null);
   const detailTrigger = useRef<HTMLButtonElement>(null);
-  const columnsMenu = useRef<HTMLDetailsElement>(null);
   const rows = useMemo(() => inventoryRows(tools, grouping), [tools, grouping]);
   const groups = useMemo(() => inventoryGroups(rows), [rows]);
   const selectedSource = groups.find(({ group }) => group.id === source)?.group;
@@ -181,7 +245,7 @@ export function ToolExplorer({ tools, active }: { tools: ToolView[]; active: boo
     if (!active) {
       setSourcesOpen(false);
       if (narrow) setDetailsOpen(false);
-      if (columnsMenu.current) columnsMenu.current.open = false;
+      setColumnsOpen(false);
     }
   }, [active, narrow]);
   const needle = searchNeedle(query);
@@ -197,12 +261,37 @@ export function ToolExplorer({ tools, active }: { tools: ToolView[]; active: boo
     setSource(id);
     setSourcesOpen(false);
   }
+  const restoreDetailFocus = useCallback(() => {
+    if (!activeOwner.current) return;
+    for (const target of [detailTrigger.current, reopenTrigger.current, searchInput.current]) {
+      if (target?.isConnected && !target.disabled && target.getClientRects().length) {
+        target.focus({ preventScroll: true });
+        break;
+      }
+    }
+  }, []);
   function closeDetails() {
+    pendingDetailFocus.current = true;
     setDetailsOpen(false);
-    if (detailTrigger.current?.isConnected) detailTrigger.current.focus({ preventScroll: true });
   }
+  useEffect(() => {
+    if (!detailsOpen && pendingDetailFocus.current) {
+      pendingDetailFocus.current = false;
+      restoreDetailFocus();
+    }
+  }, [detailsOpen, restoreDetailFocus]);
   const sources = <SourceNavigation rows={rows} grouping={grouping} selected={effectiveSource} change={selectSource} />;
-  const details = current && <ToolDetails key={current.id} tool={current.tool} />;
+  const details = current && (
+    <ToolDetails
+      key={current.id}
+      scope={current.id}
+      tool={current.tool}
+      reading={reading}
+      change={setReading}
+      scroll={detailScroll}
+      parameterExpansion={parameterExpansion.current}
+    />
+  );
   return (
     <div className={`tool-explorer ${detailsOpen && current && !narrow ? "with-details" : ""}`}>
       <p className="tool-inventory-note">
@@ -213,7 +302,9 @@ export function ToolExplorer({ tools, active }: { tools: ToolView[]; active: boo
         <section className="tool-table-pane" aria-label="Tool inventory">
           <div className="tool-toolbar">
             <div className="tool-breadcrumb">
-              <strong>{selectedSource?.label ?? "All tools"}</strong>
+              <strong title={selectedSource?.label}>
+                {selectedSource ? compactGroupLabel(selectedSource) : "All tools"}
+              </strong>
               <span>
                 {visible.length} / {tools.length} tools
               </span>
@@ -262,48 +353,56 @@ export function ToolExplorer({ tools, active }: { tools: ToolView[]; active: boo
                   ))}
                 </select>
               </label>
-              <details
-                className="tool-columns-menu"
-                ref={columnsMenu}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    if (columnsMenu.current) {
-                      columnsMenu.current.open = false;
-                      columnsMenu.current.querySelector("summary")?.focus();
-                    }
-                  }
-                }}
-              >
-                <summary>Columns</summary>
-                <fieldset>
-                  <legend>Visible columns</legend>
-                  <label>
-                    <input type="checkbox" checked disabled />
-                    Name (required)
-                  </label>
-                  {toolColumns.map(({ id, label }) => (
-                    <label key={id}>
-                      <input
-                        type="checkbox"
-                        checked={columns.has(id)}
-                        onChange={() =>
-                          setColumns((old) => {
-                            const next = new Set(old);
-                            if (next.has(id)) next.delete(id);
-                            else next.add(id);
-                            return next;
-                          })
-                        }
-                      />
-                      {label}
+              <Popover.Root open={active && columnsOpen} onOpenChange={setColumnsOpen}>
+                <Popover.Trigger>
+                  <button type="button" className="tool-columns-trigger">
+                    Columns
+                  </button>
+                </Popover.Trigger>
+                <Popover.Content
+                  className="tool-resource-popover tool-columns-menu"
+                  aria-label="Visible tool columns"
+                  align="end"
+                  collisionPadding={8}
+                  onCloseAutoFocus={(event) => {
+                    if (!activeOwner.current) event.preventDefault();
+                  }}
+                >
+                  <fieldset>
+                    <legend>Visible columns</legend>
+                    <label>
+                      <input type="checkbox" checked disabled />
+                      Name (required)
                     </label>
-                  ))}
-                </fieldset>
-              </details>
+                    {toolColumns.map(({ id, label }) => (
+                      <label key={id}>
+                        <input
+                          type="checkbox"
+                          checked={columns.has(id)}
+                          onChange={() =>
+                            setColumns((old) => {
+                              const next = new Set(old);
+                              if (next.has(id)) next.delete(id);
+                              else next.add(id);
+                              return next;
+                            })
+                          }
+                        />
+                        {label}
+                      </label>
+                    ))}
+                  </fieldset>
+                </Popover.Content>
+              </Popover.Root>
               {current && !detailsOpen && (
-                <button type="button" onClick={() => setDetailsOpen(true)}>
+                <button
+                  type="button"
+                  ref={reopenTrigger}
+                  onClick={(event) => {
+                    detailTrigger.current = event.currentTarget;
+                    setDetailsOpen(true);
+                  }}
+                >
                   Show tool details
                 </button>
               )}
@@ -335,6 +434,11 @@ export function ToolExplorer({ tools, active }: { tools: ToolView[]; active: boo
                         aria-pressed={selected === id}
                         onClick={(event) => {
                           detailTrigger.current = event.currentTarget;
+                          if (selected !== id) {
+                            setReading(initialReading());
+                            detailScroll.current = 0;
+                            parameterExpansion.current.clear();
+                          }
                           setSelected(id);
                           setDetailsOpen(true);
                         }}
@@ -346,7 +450,16 @@ export function ToolExplorer({ tools, active }: { tools: ToolView[]; active: boo
                     {toolColumns
                       .filter(({ id }) => columns.has(id))
                       .map(({ id: column }) => (
-                        <td key={column} title={column === "codemode" ? eligibility : toolCell(tool, column)}>
+                        <td
+                          key={column}
+                          title={
+                            column === "codemode"
+                              ? eligibility
+                              : column === "source"
+                                ? tool.sourceGroup?.label
+                                : toolCell(tool, column)
+                          }
+                        >
                           <span className={`tool-cell-${column}`}>{toolCell(tool, column)}</span>
                         </td>
                       ))}
@@ -399,6 +512,7 @@ export function ToolExplorer({ tools, active }: { tools: ToolView[]; active: boo
             change={setDetailsOpen}
             side="right"
             trigger={detailTrigger}
+            restoreFocus={restoreDetailFocus}
           >
             <div className="tool-explorer tool-drawer-body">{details}</div>
           </PaneDrawer>

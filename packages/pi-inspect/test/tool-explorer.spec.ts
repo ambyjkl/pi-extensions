@@ -134,7 +134,8 @@ test("source navigation separates public namespaces, packages, builtin and unkno
 test("Columns retains required Name and combines source, search and exposure filters", async ({ page }) => {
   await open(page);
   const columns = page.locator(".tool-columns-menu");
-  await columns.locator("summary").click();
+  const columnsTrigger = page.getByRole("button", { name: "Columns", exact: true });
+  await columnsTrigger.click();
   const name = columns.getByRole("checkbox", { name: "Name (required)", exact: true });
   await expect(name).toBeChecked();
   await expect(name).toBeDisabled();
@@ -145,8 +146,8 @@ test("Columns retains required Name and combines source, search and exposure fil
     await columns.getByRole("checkbox", { name: label, exact: true }).check();
   await expect(inventory(page).getByRole("columnheader")).toHaveText(["Name", "Source", "Namespace", "Description"]);
   await page.keyboard.press("Escape");
-  await expect(columns).not.toHaveAttribute("open", "");
-  await expect(columns.locator("summary")).toBeFocused();
+  await expect(columns).toHaveCount(0);
+  await expect(columnsTrigger).toBeFocused();
   await page.getByRole("searchbox", { name: "Search tools" }).fill("NPM:DOCS");
   await expect(inventory(page).locator("tbody tr")).toHaveCount(2);
   await page.getByRole("combobox", { name: "Filter tool exposure" }).selectOption("codemode");

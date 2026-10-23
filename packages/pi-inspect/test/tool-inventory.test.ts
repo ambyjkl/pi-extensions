@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { projectToolCatalog } from "../src/tool-catalog.js";
-import { inventoryGroups, inventoryRows, toolCell, toolColumns } from "../src/web/tool-inventory.js";
+import { compactGroupLabel, inventoryGroups, inventoryRows, toolCell, toolColumns } from "../src/web/tool-inventory.js";
 import { tools } from "./fixtures.js";
 
 describe("tool explorer table projection", () => {
@@ -52,6 +52,20 @@ describe("tool explorer table projection", () => {
     const rows = inventoryRows([legacy, legacy], "namespace");
     expect(rows.map(({ id }) => id)).toEqual(["position-0:0", "position-1:0"]);
     expect(rows[0]?.group).toMatchObject({ kind: "unknown", label: "Unknown source" });
+  });
+
+  it.each([
+    ["extension", "/home/user/project/packages/pi-subagents/src/index.ts", "…/pi-subagents/src/index.ts"],
+    ["extension", "C:\\Users\\user\\packages\\pi-tools\\src\\index.ts", "…/pi-tools/src/index.ts"],
+    ["extension", "<sdk:example>", "<sdk:example>"],
+    ["package", "npm:@example/pi-tools", "npm:@example/pi-tools"],
+    ["package", "/home/user/packages/pi-tools", "…/user/packages/pi-tools"],
+    ["namespace", "mcp__docs/search", "mcp__docs/search"],
+    ["extension", "\u001b[31m/home/user/packages/pi-tools/src/index.ts", "…/pi-tools/src/index.ts"],
+  ] as const)("compacts %s labels without changing provenance: %s", (kind, label, expected) => {
+    const group = { id: "original", kind, label };
+    expect(compactGroupLabel(group)).toBe(expected);
+    expect(group).toEqual({ id: "original", kind, label });
   });
 
   it("renders every selectable column from bounded captured metadata", () => {

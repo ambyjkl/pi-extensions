@@ -19,6 +19,7 @@ export function PaneDrawer({
   side,
   trigger,
   className = "",
+  restoreFocus,
 }: {
   name: string;
   open: boolean;
@@ -27,6 +28,7 @@ export function PaneDrawer({
   side: string;
   trigger: RefObject<HTMLButtonElement | null>;
   className?: string;
+  restoreFocus?(): void;
 }) {
   return (
     <Dialog.Root open={open} onOpenChange={change}>
@@ -34,7 +36,8 @@ export function PaneDrawer({
         className={`side-drawer side-drawer-${side} ${className}`}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
-          if (trigger.current?.isConnected) trigger.current.focus({ preventScroll: true });
+          if (restoreFocus) restoreFocus();
+          else if (trigger.current?.isConnected) trigger.current.focus({ preventScroll: true });
         }}
       >
         <div className="drawer-title">

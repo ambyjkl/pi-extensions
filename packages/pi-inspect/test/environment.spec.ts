@@ -207,7 +207,7 @@ for (const width of [320, 375, 900, 1672]) {
             ".tool-detail-content .copy-button, .tool-explorer .navigation-tabs button, " +
             ".tool-inventory-table thead th, .tool-inventory-table td > span, .tool-note, " +
             ".tool-source, .tool-source > span, .tool-source-category > summary, .tool-count, " +
-            ".tool-toolbar-controls > label, .tool-toolbar-controls select, .tool-columns-menu > summary",
+            ".tool-toolbar-controls > label, .tool-toolbar-controls select, .tool-columns-trigger",
         )
         .evaluateAll((elements) =>
           elements

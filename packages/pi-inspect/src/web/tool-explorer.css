@@ -76,7 +76,9 @@
 }
 .tool-source > span:first-child {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .tool-count {
   flex-shrink: 0;
@@ -120,7 +122,9 @@
 }
 .tool-toolbar {
   padding: 12px;
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-height: 0;
+  overflow: auto;
 }
 .tool-breadcrumb {
   display: flex;
@@ -130,7 +134,11 @@
   margin-bottom: 12px;
 }
 .tool-breadcrumb strong {
-  overflow-wrap: anywhere;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .tool-breadcrumb > span {
   color: var(--secondary);
@@ -156,7 +164,7 @@
   max-width: 100%;
 }
 .tool-toolbar-controls :is(input[type="search"], select, button),
-.tool-columns-menu > summary {
+.tool-columns-trigger {
   border: 1px solid var(--panel-border);
   border-radius: 5px;
   background: var(--panel-bg);
@@ -167,24 +175,27 @@
 .tool-toolbar-controls select {
   max-width: 100%;
 }
-.tool-columns-menu {
-  position: relative;
-}
-.tool-columns-menu > summary {
-  cursor: pointer;
-}
-.tool-columns-menu fieldset {
-  position: absolute;
-  right: 0;
-  z-index: 5;
+.tool-columns-menu.rt-PopoverContent {
   width: 210px;
-  max-width: 75vw;
-  margin: 4px 0 0;
+  max-width: calc(100vw - 16px);
+  max-height: var(--radix-popover-content-available-height);
+  overflow: auto;
   padding: 8px;
   border: 1px solid var(--panel-border);
   border-radius: 6px;
   background: var(--panel-bg);
-  box-shadow: 0 6px 18px #0002;
+  color: var(--gray-12);
+  font-size: 12px;
+}
+.tool-columns-menu fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.tool-columns-menu input:focus-visible {
+  outline: 2px solid var(--blue-9);
+  outline-offset: 2px;
 }
 .tool-columns-menu legend {
   padding: 2px 4px;
@@ -198,7 +209,7 @@
   padding: 6px 3px;
 }
 .tool-table-scroll {
-  min-height: 0;
+  min-height: min(110px, 25dvh);
   flex: 1;
   overflow: auto;
   scrollbar-width: thin;
@@ -260,9 +271,13 @@
   padding: 16px;
 }
 .tool-detail-pane {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   border-left: 1px solid var(--panel-border);
 }
 .tool-panel-heading {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -274,7 +289,11 @@
 }
 .tool-detail-content {
   padding: 14px;
+  flex: 1;
+  min-height: 0;
   min-width: 0;
+  overflow: auto;
+  scrollbar-width: thin;
   overflow-wrap: anywhere;
 }
 .tool-detail-content > .rt-Heading {
@@ -339,8 +358,9 @@
 .tool-detail-content .data-toolbar {
   flex-wrap: wrap;
 }
-/* Portals sit outside .inspector-app; keep this owned drawer in the same palette. */
-.tool-resource-drawer {
+/* Portals sit outside .inspector-app; keep owned overlays in the same palette. */
+.tool-resource-drawer,
+.tool-resource-popover.radix-themes.rt-PopoverContent {
   --panel-bg: #faf8f3;
   --panel-raised: #eeebe4;
   --surface-hover: #e9e6de;
@@ -352,7 +372,8 @@
   --heading-font-family: var(--default-font-family);
   font-family: var(--default-font-family);
 }
-.radix-themes.dark .tool-resource-drawer {
+.radix-themes.dark .tool-resource-drawer,
+.tool-resource-popover.radix-themes.dark {
   --panel-bg: #26292e;
   --panel-raised: #30343a;
   --surface-hover: #353a41;
@@ -365,6 +386,9 @@
   background: var(--panel-bg);
 }
 .tool-drawer-body {
+  overflow: hidden;
+}
+.tool-drawer-body > .tool-sources {
   overflow: auto;
 }
 @media (max-width: 1100px) {
