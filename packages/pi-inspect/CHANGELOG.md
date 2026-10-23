@@ -1,5 +1,16 @@
 # @narumitw/pi-inspect
 
+## 0.4.0
+
+### Minor Changes
+
+- 6ffefab: Replace Environment tool cards with a source explorer, searchable tool table, selectable columns and a responsive detail panel. Show nested-call eligibility for codemode without claiming runner availability or MCP ownership.
+
+### Patch Changes
+
+- 1eb53e8: Move Tools, MCP Servers and Skills into the primary navigation beside Context, Session and Cache. Remove the Environment navigation layer while preserving lazy catalog mounting, independent reading state and overlay cleanup on navigation.
+- 0341b4d: Use precise Environment tool labels: Namespaces, separate Extensions and Packages categories, and Namespace, Source and Exposure grouping options. Preserve namespace fallback to the registration source.
+
 ## 0.3.4
 
 ### Patch Changes
