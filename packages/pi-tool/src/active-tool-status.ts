@@ -1,4 +1,5 @@
-import type { ExtensionAPI, ExtensionContext, Theme, ToolInfo } from "@earendil-works/pi-coding-agent";
+import { basename, dirname, extname } from "node:path";
+import type { ExtensionAPI, ExtensionContext, SourceInfo, Theme, ToolInfo } from "@earendil-works/pi-coding-agent";
 import { stripTerminalSequences, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { EditorStatusWidget } from "@narumitw/pi-tui-kit/editor-status-widget";
 
@@ -112,6 +113,10 @@ export function formatActiveToolWidget(
     if (tool.exposure === "codemode" || tool.exposure === "deferred") names.add(tool.name);
   }
   const mcpNamespaces = new Map<string | undefined, number>();
+  const extensions = new Map<
+    string | undefined,
+    { label: string; count: number; codemode: number; deferred: number }
+  >();
   const groups: Record<"Built-in" | "MCP" | "Extension", string[]> = {
     "Built-in": [],
     MCP: [],
@@ -130,6 +135,14 @@ export function formatActiveToolWidget(
       const namespace = tool?.namespace?.name;
       mcpNamespaces.set(namespace, (mcpNamespaces.get(namespace) ?? 0) + 1);
     }
+    if (group === "Extension") {
+      const source = tool?.sourceInfo;
+      const key = source?.source === "sdk" ? "sdk" : source ? `path:${source.path}` : undefined;
+      const summary = extensions.get(key) ?? { label: extensionLabel(source), count: 0, codemode: 0, deferred: 0 };
+      summary.count += 1;
+      if (tool?.exposure === "codemode" || tool?.exposure === "deferred") summary[tool.exposure] += 1;
+      extensions.set(key, summary);
+    }
     const marker = tool?.exposure === "codemode" || tool?.exposure === "deferred" ? ` [${tool.exposure}]` : "";
     groups[group].push(`${sanitizeToolName(name)}${marker}`);
   }
@@ -144,10 +157,36 @@ export function formatActiveToolWidget(
               const label = namespace ? sanitizeToolName(namespace).replace(/^mcp__/, "") || "Other" : "Other";
               return `${label} (${count})`;
             })
-          : tools;
+          : group === "Extension"
+            ? [...extensions.values()].map(({ label, count, codemode, deferred }) =>
+                [
+                  `${label} (${count})`,
+                  ...(codemode > 0 ? [`[codemode: ${codemode}]`] : []),
+                  ...(deferred > 0 ? [`[deferred: ${deferred}]`] : []),
+                ].join(" "),
+              )
+            : tools;
       return tools.length > 0 ? [`${group} (${tools.length}): ${labels.join(" · ")}`] : [];
     }),
   ];
+}
+
+function extensionLabel(source: SourceInfo | undefined): string {
+  if (!source) return "Other";
+  if (source.source === "sdk") return "SDK";
+  const safeSource = stripTerminalSequences(source.source).replace(/[\p{Cc}\p{Cf}]/gu, "");
+  if (safeSource.startsWith("npm:")) {
+    const name = safeSource.slice(4).split("/").at(-1)?.split("@")[0];
+    return name ? sanitizeToolName(name) : "Other";
+  }
+  const safePath = stripTerminalSequences(source.path).replace(/[\p{Cc}\p{Cf}]/gu, "");
+  let label = basename(safePath, extname(safePath));
+  if (label === "index") {
+    let directory = dirname(safePath);
+    if (basename(directory) === "src" || basename(directory) === "dist") directory = dirname(directory);
+    label = basename(directory);
+  }
+  return label ? sanitizeToolName(label) : "Other";
 }
 
 export function renderActiveToolWidget(lines: readonly string[], theme: Theme, width: number): string[] {

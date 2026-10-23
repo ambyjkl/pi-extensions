@@ -87,10 +87,13 @@ Writes are ordered within one Pi process, but separate Pi processes do not share
 
 When enabled, the widget shows active tools plus registered tools with `codemode` or `deferred` exposure above the editor.
 It groups tools in **Built-in**, **MCP**, and **Extension** order, omits empty groups, and shows a count for each group.
-MCP tools are summarized by namespace and tool count instead of listing each tool; tools without a namespace are counted under **Other**.
-For example: `MCP (88): chrome_devtools (33) · alphaxiv (25) · firecrawl (27) · Other (3)`.
+MCP tools are summarized by namespace and tool count; tools without a namespace are counted under **Other**.
+Extension tools are summarized by source entrypoint and tool count, for example: `Extension (8): pi-goal (3) · pi-subagents (5)`.
+Extension labels use the npm package name or local entrypoint name. An `index` entrypoint uses its parent directory, skipping a `src` or `dist` directory.
+SDK tools share an **SDK** summary, and active names without metadata share **Other**.
 Use `/tool` to browse the full tool list.
-Built-in and Extension entries show `[codemode]` or `[deferred]` for these runtime exposures; both allow calls from codemode scripts without activation.
+Built-in entries show `[codemode]` or `[deferred]` for these runtime exposures; Extension summaries show their counts, such as `[codemode: 2]`.
+Both exposures allow calls from codemode scripts without activation.
 Pi reports MCP tools configured as `codemode` as runtime `deferred` tools.
 Inactive `direct` and `model-only` tools are omitted, as are all `hidden` tools.
 
@@ -98,7 +101,7 @@ Grouping uses Pi's public source metadata and MCP namespaces, not tool-name pref
 MCP resource tools belong to MCP; SDK-provided tools and active names without source metadata use the Extension group.
 It refreshes on relevant lifecycle events and polls for active-tool, source, and exposure changes made by other extensions.
 It clears immediately when disabled or when the session is replaced, reloaded, or shut down.
-Tool names and namespace labels are sanitized and bounded before terminal rendering.
+Tool names, namespace labels, and extension labels are sanitized and bounded before terminal rendering.
 
 ## 🔒 Security and privacy
 
