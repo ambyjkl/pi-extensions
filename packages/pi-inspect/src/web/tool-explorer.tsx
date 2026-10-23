@@ -160,8 +160,9 @@ function SourceNavigation({
       ? [{ label: "Exposure", kinds: ["unknown"] }]
       : [
           { label: "Built-in", kinds: ["builtin"] },
-          { label: "Namespaces / MCP", kinds: ["namespace"] },
-          { label: "Extensions / Packages", kinds: ["extension", "package"] },
+          { label: "Namespaces", kinds: ["namespace"] },
+          { label: "Extensions", kinds: ["extension"] },
+          { label: "Packages", kinds: ["package"] },
           { label: "Unknown", kinds: ["unknown"] },
         ];
   return (
@@ -333,8 +334,8 @@ export function ToolExplorer({ tools, active }: { tools: ToolView[]; active: boo
                     setSource("all");
                   }}
                 >
-                  <option value="namespace">Namespace / source</option>
-                  <option value="source">Extension / package</option>
+                  <option value="namespace">Namespace</option>
+                  <option value="source">Source</option>
                   <option value="exposure">Exposure</option>
                 </select>
               </label>

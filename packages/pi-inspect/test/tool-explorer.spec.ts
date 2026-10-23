@@ -92,8 +92,12 @@ async function bounded(page: Page) {
 test("source navigation separates public namespaces, packages, builtin and unknown provenance", async ({ page }) => {
   await open(page);
   const sources = page.getByRole("navigation", { name: "Tool sources" });
-  await expect(sources).toContainText("Namespaces / MCP");
-  await expect(sources).toContainText("Extensions / Packages");
+  await expect(sources.locator("summary")).toHaveText(["Built-in1", "Namespaces2", "Extensions1", "Unknown1"]);
+  await expect(page.getByRole("combobox", { name: "Group tools by" }).locator("option")).toHaveText([
+    "Namespace",
+    "Source",
+    "Exposure",
+  ]);
   await expect(inventory(page).locator("tbody tr")).toHaveText([
     "readdirectEligibleYes",
     "search_docscodemodeEligibleNo",
@@ -109,6 +113,7 @@ test("source navigation separates public namespaces, packages, builtin and unkno
   await expect(inventory(page).getByRole("button")).toHaveText(["mcp__pretend__name"]);
   await expect(sources).not.toContainText("mcp__pretend");
   await page.getByRole("combobox", { name: "Group tools by" }).selectOption("source");
+  await expect(sources.locator("summary")).toHaveText(["Built-in1", "Extensions1", "Packages2", "Unknown1"]);
   await expect(sources.getByRole("button", { name: "mcp__docs 2", exact: true })).toHaveCount(0);
   await sources.getByRole("button", { name: "npm:docs 2", exact: true }).click();
   await expect(inventory(page).getByRole("button")).toHaveText(["search_docs", "fetch_docs"]);
@@ -130,6 +135,34 @@ test("source navigation separates public namespaces, packages, builtin and unkno
   await expect(inventory(page).locator("tbody tr")).toHaveCount(4);
   expect(f.manager.getLeafId()).toBe(value.leafId);
 });
+
+for (const width of [320, 1672]) {
+  test(`namespace labels include non-MCP tools and source fallbacks at ${width}px`, async ({ page }) => {
+    const mcp = catalog.find((entry) => entry.name === "search_docs");
+    if (!mcp) throw Error("Missing MCP fixture");
+    catalog = [
+      tool("native_search", { namespace: { name: "github" } }),
+      mcp,
+      tool("local_review"),
+      { ...mcp, name: "package_review", namespace: undefined },
+    ];
+    project();
+    await open(page, width);
+    if (width === 320) await page.getByRole("button", { name: "Sources", exact: true }).click();
+    const sources = page.getByRole("navigation", { name: "Tool sources" });
+    await expect(sources.locator("summary")).toHaveText(["Namespaces2", "Extensions1", "Packages1"]);
+    const namespaces = sources
+      .locator("details")
+      .filter({ has: page.locator("summary", { hasText: /^Namespaces2$/ }) });
+    await expect(namespaces.getByRole("button")).toHaveText(["github1", "mcp__docs1"]);
+    await sources.getByRole("button", { name: "github 1", exact: true }).click();
+    await expect(inventory(page).getByRole("button")).toHaveText(["native_search"]);
+    if (width === 320) await page.getByRole("button", { name: "Sources", exact: true }).click();
+    await sources.getByRole("button", { name: "npm:docs 1", exact: true }).click();
+    await expect(inventory(page).getByRole("button")).toHaveText(["package_review"]);
+    await bounded(page);
+  });
+}
 
 test("Columns retains required Name and combines source, search and exposure filters", async ({ page }) => {
   await open(page);
