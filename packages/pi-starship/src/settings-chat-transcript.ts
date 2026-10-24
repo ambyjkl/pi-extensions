@@ -21,6 +21,11 @@ function displayValue<T>(value: T): T {
   return value;
 }
 
+export interface SettingsChatAnchor {
+  message: AgentMessage;
+  row: number;
+}
+
 /** Reuse Pi's public message components, not another extension's renderer or private settings. */
 export function createSettingsChatTranscript(agent: Agent, tui: TUI, cwd: string) {
   const messages = new Map<AgentMessage, Component>();
@@ -30,10 +35,12 @@ export function createSettingsChatTranscript(agent: Agent, tui: TUI, cwd: string
     write: createWriteToolDefinition(cwd),
     edit: createEditToolDefinition(cwd),
   };
+  let spans: Array<{ message: AgentMessage; start: number; end: number }> = [];
   let streaming: AssistantMessageComponent | undefined;
   let disposed = false;
   return {
     render(width: number): string[] {
+      spans = [];
       if (disposed || width <= 0) return [];
       const results = new Map(
         agent.state.messages.flatMap((message) =>
@@ -88,9 +95,11 @@ export function createSettingsChatTranscript(agent: Agent, tui: TUI, cwd: string
       };
       for (const message of visible) {
         activeMessages.add(message);
+        let start = lines.length;
         let component = messages.get(message);
         if (message.role === "user") {
           if (lines.length) lines.push("");
+          start = lines.length;
           if (!component) {
             const text =
               typeof message.content === "string"
@@ -110,17 +119,29 @@ export function createSettingsChatTranscript(agent: Agent, tui: TUI, cwd: string
           }
           appendAssistant(message, component as AssistantMessageComponent);
         }
+        spans.push({ message, start, end: lines.length });
       }
       const partial = agent.state.streamingMessage;
       if (partial?.role === "assistant") {
         streaming ??= new AssistantMessageComponent(undefined, true);
         streaming.updateContent(displayValue(partial), true);
         // Tool calls are rendered after finalization, not from incomplete streaming arguments.
+        const start = lines.length;
         lines.push(...streaming.render(width));
+        spans.push({ message: partial, start, end: lines.length });
       } else streaming = undefined;
       for (const message of messages.keys()) if (!activeMessages.has(message)) messages.delete(message);
       for (const id of tools.keys()) if (!activeTools.has(id)) tools.delete(id);
       return lines;
+    },
+    anchorAt(row: number): SettingsChatAnchor | undefined {
+      const span = spans.find((item) => row < item.end);
+      return span ? { message: span.message, row: row - span.start } : undefined;
+    },
+    rowAt(anchor: SettingsChatAnchor): number {
+      const span = spans.find((item) => item.message === anchor.message);
+      // If the anchored message was evicted, show the oldest retained content.
+      return span ? Math.max(0, span.start + Math.min(anchor.row, span.end - span.start - 1)) : 0;
     },
     invalidate() {
       if (disposed) return;
@@ -132,6 +153,7 @@ export function createSettingsChatTranscript(agent: Agent, tui: TUI, cwd: string
     },
     dispose() {
       disposed = true;
+      spans = [];
       messages.clear();
       tools.clear();
       streaming = undefined;

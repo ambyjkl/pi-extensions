@@ -60,6 +60,32 @@ test("user and assistant blocks exactly reuse native Markdown, backgrounds, padd
   }
 });
 
+test("message anchors retain exact rows through eviction and invalidation", () => {
+  const f = fixture(
+    Array.from({ length: 30 }, (_, index) => ({
+      role: "user" as const,
+      content: Array.from({ length: (index % 5) + 1 }, (_, row) => `message-${index}-row-${row}`).join("\n"),
+      timestamp: index,
+    })),
+  );
+  try {
+    const before = f.transcript.render(80);
+    const anchors = before.map((line, row) => ({ line, anchor: f.transcript.anchorAt(row) }));
+    f.agent.state.messages.push({ role: "user", content: "new message", timestamp: 30 });
+    f.transcript.invalidate();
+    const after = f.transcript.render(80);
+    for (const { line, anchor } of anchors) {
+      assert.ok(anchor);
+      if (anchor.message === f.agent.state.messages[0]) assert.equal(f.transcript.rowAt(anchor), 0);
+      else if (anchor.row >= 0) assert.equal(after[f.transcript.rowAt(anchor)], line);
+    }
+    f.transcript.dispose();
+    assert.equal(f.transcript.anchorAt(0), undefined);
+  } finally {
+    f.transcript.dispose();
+  }
+});
+
 for (const isError of [false, true]) {
   test(`tool ${isError ? "error" : "success"} uses native tool framing without changing raw arguments or results`, async () => {
     const unsafe = "\x1b]52;c;secret\x07";

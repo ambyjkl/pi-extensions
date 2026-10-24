@@ -102,8 +102,8 @@ for (const remapped of [false, true]) {
       CHAT_KEYS,
       remapped
         ? {
-            "tui.editor.pageUp": "ctrl+u",
-            "tui.editor.pageDown": "ctrl+d",
+            "tui.editor.pageUp": "ctrl+alt+u",
+            "tui.editor.pageDown": "ctrl+alt+d",
           }
         : {},
     );
@@ -118,7 +118,7 @@ for (const remapped of [false, true]) {
       const bottom = f.tui.render().join("\n");
       assert.match(bottom, /history-119/u);
       f.tui.type("keep this draft");
-      f.tui.send(remapped ? "\x15" : "\x1b[5~");
+      f.tui.send(remapped ? "\x1b[117;7u" : "\x1b[5~");
       const older = f.tui.render().join("\n");
       assert.doesNotMatch(older, /history-119/u);
       assert.match(older, /keep this draft/u);
@@ -126,7 +126,7 @@ for (const remapped of [false, true]) {
       assert.equal(f.tui.render().join("\n"), older);
       f.tui.mouse({ type: "wheel", x: 1, y: 1, wheelDelta: -1 });
       assert.notEqual(f.tui.render().join("\n"), older);
-      for (let i = 0; i < 10; i++) f.tui.send(remapped ? "\x04" : "\x1b[6~");
+      for (let i = 0; i < 10; i++) f.tui.send(remapped ? "\x1b[100;7u" : "\x1b[6~");
       assert.match(f.tui.render().join("\n"), /new-tail/u);
       for (const width of [1, 20, 80]) {
         const frame = f.tui.render(width);
@@ -135,6 +135,42 @@ for (const remapped of [false, true]) {
       f.tui.send("\x03");
       assert.equal(await f.running, "discard");
       assert.equal(f.state.input, "keep this draft");
+    } finally {
+      await f.dispose();
+    }
+  });
+}
+
+for (const appended of [1, 5, 30]) {
+  test(`history keeps retained content stable after ${appended} message evictions`, async () => {
+    const f = fixture();
+    const message = (index: number) => ({
+      role: "user" as const,
+      content: Array.from({ length: 4 }, (_, row) => `message-${index}-row-${row}`).join("\n"),
+      timestamp: index,
+    });
+    try {
+      await f.tui.waitForOpen();
+      f.agent.state.messages.push(...Array.from({ length: 30 }, (_, index) => message(index)));
+      f.tui.render();
+      f.tui.send("\x1b[5~");
+      const older = f.tui.render();
+      assert.doesNotMatch(older.join("\n"), /message-29-row-3/u);
+      f.agent.state.messages.push(...Array.from({ length: appended }, (_, index) => message(30 + index)));
+      const after = f.tui.render();
+      if (appended < 30) assert.deepEqual(after, older);
+      else {
+        // The anchor itself is gone. Show the oldest retained message, not a later one.
+        assert.match(after.join("\n"), /message-30-row-0/u);
+        assert.doesNotMatch(after.join("\n"), /message-59-row-3/u);
+      }
+      for (let index = 0; index < 20; index++) {
+        f.tui.send("\x1b[6~");
+        f.tui.render();
+      }
+      assert.match(f.tui.render().join("\n"), new RegExp(`message-${29 + appended}-row-3`, "u"));
+      f.agent.state.messages.push(message(30 + appended));
+      assert.match(f.tui.render().join("\n"), new RegExp(`message-${30 + appended}-row-3`, "u"));
     } finally {
       await f.dispose();
     }
