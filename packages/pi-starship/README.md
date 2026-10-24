@@ -135,7 +135,7 @@ These message shortcuts use Pi's configured bindings and native precedence, incl
 The configured cancel action stops an active response and restores undelivered messages to the editor; when idle, it opens review actions for continuing, inspecting the full transcript or exact draft, saving, or discarding.
 Failed or aborted responses also restore undelivered messages without restarting automatically.
 Editor actions win conflicting cancel bindings, and Escape remains a review fallback unless assigned to an editor action.
-Ctrl+C discards the entire flow, including when cancellation is remapped.
+Ctrl+C discards the entire flow, including when cancellation is remapped, and restores the current session's active footer.
 The fullscreen chat reuses Pi's native user, assistant, and tool message components, including Markdown, user-message backgrounds, and message spacing.
 The editor and footer preview stay at the bottom while the transcript grows above them.
 Short gray labels on the editor borders show draft status and controls.
@@ -144,7 +144,9 @@ At short heights, error details yield first; if the whole preview cannot fit bes
 The view shows recent output with expanded, read-only tool results; use the full conversation review for earlier or long responses.
 Choose **Continue** in a document or transcript review; cancelling discards the temporary draft but keeps any previously saved profile.
 
-**The agent never writes the active settings file or profiles.** Choose **Save draft as profile…**, review the exact draft, and enter a profile name; invalid or existing names require another name, without overwriting profiles.
+**The agent never writes the active settings file or profiles.** When idle with a valid draft, press **Ctrl+S** to save it as a profile; the gray editor-border hint shows the active save key.
+If Ctrl+S conflicts with a native editing, cancel, or message action, **F2** is used instead. If both are reserved, no save shortcut is shown; the review menu still offers **Save draft as profile…**.
+Review the exact draft and enter a profile name; invalid or existing names require another name, without overwriting profiles.
 After the profile is saved, a separate confirmation asks whether to apply it to the current footer without reload, retaining the previous active document in History.
 Declining closes the chat, keeps the saved profile, and leaves active settings unchanged; an application failure also retains the profile.
 Applying can start enabled module commands and network requests; review those settings first.

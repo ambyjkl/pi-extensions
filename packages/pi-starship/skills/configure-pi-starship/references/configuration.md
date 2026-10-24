@@ -37,8 +37,10 @@ During a response, normal submission queues steering for the next assistant turn
 The app.message.dequeue action restores pending messages to the editor; these message actions use Pi's native precedence, including explicit history bindings.
 The configured cancel action stops a response and restores undelivered messages, or opens review when idle; editor actions win review-key collisions, with Escape as a review fallback unless assigned to an editor action.
 Failed or aborted responses restore undelivered input without automatic restart.
-Ctrl+C discards the flow and clears both queues.
-The separate Save draft as profile action requires exact-draft review and a profile name; invalid or existing names are rejected without overwriting a profile.
+Ctrl+C discards the flow, clears both queues, and restores the active footer unless its session was replaced.
+When idle with a valid draft, Ctrl+S opens the Save draft as profile flow directly; its gray editor-border hint switches to F2 if Ctrl+S is reserved, or is omitted when both keys conflict.
+The review menu retains the same save action.
+Saving requires exact-draft review and a profile name; invalid or existing names are rejected without overwriting a profile.
 After saving, the host asks whether to apply that profile through managed History and atomic replacement; declining keeps the profile without changing active settings.
 Cancelling naming returns to the chat without saving; closing or session replacement removes the temporary draft, not any saved profile.
 Application checks the initial disk snapshot, loaded revision, and saved profile identity, blocks detected concurrent changes, and warns before explicitly repairing an invalid original.

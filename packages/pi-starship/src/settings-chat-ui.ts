@@ -24,6 +24,36 @@ import type { WorkflowOwner } from "./command-configuration.js";
 import { createSettingsChatTranscript } from "./settings-chat-transcript.js";
 import type { SettingsDraft } from "./settings-draft.js";
 
+export type SettingsChatAction = "review" | "save" | "discard";
+
+const SAVE_SHORTCUTS = [
+  { key: "ctrl+s", inputs: ["\x13", "\x1b[115;5u", "\x1b[27;5;115~"] },
+  { key: "f2", inputs: ["\x1bOQ", "\x1b[12~", "\x1b[[B"] },
+] as const;
+
+/** Never replace native editing, cancellation, or registered message actions. */
+function saveKeyReserved(data: string, keybindings: Pick<KeybindingsManager, "matches">): boolean {
+  const editorKeys = getKeybindings();
+  return (
+    (Object.keys(TUI_KEYBINDINGS) as Array<keyof typeof TUI_KEYBINDINGS>).some(
+      (action) => editorKeys.matches(data, action) || keybindings.matches(data, action),
+    ) ||
+    (
+      ["app.clipboard.pasteImage", "app.interrupt", "app.exit", "app.message.followUp", "app.message.dequeue"] as const
+    ).some((action) => keybindings.matches(data, action))
+  );
+}
+
+/** Check supported input encodings through Pi's matcher before displaying a save hint. */
+export function settingsChatSaveShortcut(
+  keybindings: Pick<KeybindingsManager, "matches">,
+): "ctrl+s" | "f2" | undefined {
+  return SAVE_SHORTCUTS.find(({ key, inputs }) => {
+    const matching = inputs.filter((data) => matchesKey(data, key));
+    return matching.length > 0 && matching.every((data) => !saveKeyReserved(data, keybindings));
+  })?.key;
+}
+
 export interface ChatViewState {
   input: string;
   error: string;
@@ -149,7 +179,7 @@ export function createSettingsChatComponent(options: {
   keybindings: KeybindingsManager;
   signal: AbortSignal;
   preview(width: number): string[];
-  complete(value: "review" | "discard"): void;
+  complete(value: SettingsChatAction): void;
 }) {
   const { agent, draft, state, tui, theme, keybindings, signal } = options;
   let disposed = false;
@@ -169,9 +199,10 @@ export function createSettingsChatComponent(options: {
             : draft.diagnostics
               ? "Warnings"
               : "Valid";
+      const saveKey = !pending && !inPaste && draft.candidate ? settingsChatSaveShortcut(keybindings) : undefined;
       return {
         top: queued.length > 0 ? `pi-starship · ${queued.length} queued` : "pi-starship",
-        bottom: `${status} · unsaved · ${pending ? "Working · Cancel stop" : "Cancel review"} · Ctrl+C discard`,
+        bottom: `${status} · unsaved · ${pending ? "Working · Cancel stop" : saveKey ? `${saveKey} save profile` : "Cancel review"} · Ctrl+C discard`,
       };
     },
     keybindings,
@@ -314,6 +345,7 @@ export function createSettingsChatComponent(options: {
     },
     handleInput(data: string) {
       if (disposed || signal.aborted || isKeyRelease(data)) return;
+      const saveKey = !pending && draft.candidate ? settingsChatSaveShortcut(keybindings) : undefined;
       // Forward entire paste packets and fragments without interpreting embedded shortcuts.
       if (inPaste || data.includes("\x1b[200~")) {
         inPaste = !data.includes("\x1b[201~");
@@ -321,6 +353,9 @@ export function createSettingsChatComponent(options: {
       } else if (matchesKey(data, Key.ctrl("c"))) {
         abort();
         options.complete("discard");
+      } else if (saveKey && matchesKey(data, saveKey) && !saveKeyReserved(data, keybindings)) {
+        state.input = editor.getExpandedText();
+        options.complete("save");
       } else if (settingsChatReviewInput(data, keybindings)) {
         if (pending) {
           stopping = true;
@@ -356,7 +391,7 @@ export async function showSettingsChat(
   state: ChatViewState,
   owner: WorkflowOwner,
   preview: (width: number) => string[],
-): Promise<"review" | "discard"> {
+): Promise<SettingsChatAction> {
   // Keep Kit's cancellation/disposal runner, but mount through Pi's public overlay API.
   // No second TUI, terminal handoff, or manipulation of unrelated overlay handles is needed.
   const fullscreenContext: ExtensionCommandContext = {
@@ -370,7 +405,7 @@ export async function showSettingsChat(
         }),
     },
   };
-  const result = await runCustomInteraction<"review" | "discard">(fullscreenContext, {
+  const result = await runCustomInteraction<SettingsChatAction>(fullscreenContext, {
     signal: owner.signal,
     isCurrent: owner.isCurrent,
     create: ({ tui, theme, keybindings, signal, complete }) =>

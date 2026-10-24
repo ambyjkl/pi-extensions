@@ -101,10 +101,9 @@ def run(action, mode):
             assert record["requests"] == 4
             assert record["userMessages"] == ["first", "second", "follow"]
             assert record["executedTools"] == ["read", "write", "edit"]
+            wait_for("ctrl+s save profile")
             if action in ("save", "save-only"):
-                send(b"\x1b")
-                wait_for("Save draft as profile")
-                send(b"\x1b[B" * 3 + b"\r")
+                send(b"\x13")
                 wait_for("Review draft before saving")
                 send(b"\r")
                 wait_for("Save as a profile")

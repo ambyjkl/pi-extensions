@@ -11,6 +11,7 @@ import {
   getKeybindings,
   isKittyProtocolActive,
   KeybindingsManager,
+  matchesKey,
   setKeybindings,
   setKittyProtocolActive,
   TUI_KEYBINDINGS,
@@ -23,6 +24,7 @@ import {
   createSettingsChatComponent,
   SettingsChatEditor,
   settingsChatReviewInput,
+  settingsChatSaveShortcut,
   settingsChatTranscript,
   showSettingsChat,
 } from "../src/settings-chat-ui.js";
@@ -33,6 +35,9 @@ const CHAT_KEYS = {
   ...TUI_KEYBINDINGS,
   "app.message.followUp": { defaultKeys: "alt+enter" },
   "app.message.dequeue": { defaultKeys: "alt+up" },
+  "app.clipboard.pasteImage": { defaultKeys: "ctrl+v" },
+  "app.interrupt": { defaultKeys: "escape" },
+  "app.exit": { defaultKeys: "ctrl+d" },
 } as const;
 
 function fixture(
@@ -162,7 +167,7 @@ test("fullscreen dock handles zero dimensions, callback theme changes, and read-
     assert.ok(!frame.some((line) => /─ Preview /u.test(line)));
     assert.equal(previewRow, frame.length - 1);
     assert.match(frame[previewRow - 3], /^─ pi-starship ─+$/u);
-    assert.match(frame[previewRow - 1], /^─ Valid · unsaved · Cancel review · Ctrl\+C discard ─+$/u);
+    assert.match(frame[previewRow - 1], /^─ Valid · unsaved · ctrl\+s save profile · Ctrl\+C discard ─+$/u);
     assert.ok(dimLabels.some((label) => label.includes("pi-starship")));
     assert.ok(dimLabels.some((label) => label.includes("Valid · unsaved")));
     assert.ok(!frame.some((line) => line.includes("Active file unchanged")));
@@ -273,6 +278,8 @@ test("fragmented paste never triggers cancellation and preserves the unsubmitted
   try {
     await f.tui.waitForOpen();
     f.tui.send("\x1b[200~hello");
+    assert.ok(!f.tui.render().join("\n").includes("save profile"));
+    f.tui.send("\x13");
     f.tui.send("\x03");
     f.tui.send("\x1b[201~");
     assert.equal(f.tui.isOpen, true);
@@ -312,6 +319,9 @@ for (const exit of ["escape", "hard cancel", "disposal", "owner abort"] as const
       f.tui.send("\r");
       await started;
       assert.match(f.tui.render().join("\n"), /Working/u);
+      assert.ok(!f.tui.render().join("\n").includes("save profile"));
+      f.tui.send("\x13");
+      assert.equal(f.tui.isOpen, true);
       f.tui.type("steer while waiting");
       f.tui.send("\r");
       f.tui.type("follow up while waiting");
@@ -335,6 +345,72 @@ for (const exit of ["escape", "hard cancel", "disposal", "owner abort"] as const
     }
   });
 }
+
+for (const [name, bindings, kitty, expected, packet] of [
+  ["default", {}, false, "ctrl+s", "\x13"],
+  ["Kitty", {}, true, "ctrl+s", "\x1b[115;5u"],
+  ["modifyOtherKeys", {}, false, "ctrl+s", "\x1b[27;5;115~"],
+  ["submit collision", { "tui.input.submit": "ctrl+s" }, false, "f2", "\x1bOQ"],
+  ["case alias", { "tui.input.submit": "CTRL+S" }, true, "f2", "\x1bOQ"],
+  ["message collision", { "app.message.followUp": "ctrl+s" }, false, "f2", "\x1b[12~"],
+  ["history collision", { "tui.editor.historyPrevious": "ctrl+s" }, false, "f2", "\x1bOQ"],
+  ["cancel collision", { "tui.select.cancel": "ctrl+s" }, false, "f2", "\x1bOQ"],
+  ["interrupt collision", { "app.interrupt": "ctrl+s" }, false, "f2", "\x1bOQ"],
+  ["clipboard collision", { "app.clipboard.pasteImage": "ctrl+s" }, false, "f2", "\x1bOQ"],
+  ["invalid configured key", { "tui.input.submit": "ctrl+" }, false, "ctrl+s", "\x13"],
+  ["invalid modifier", { "app.message.followUp": "shift+f2" }, false, "ctrl+s", "\x13"],
+  ["modifier order", { "app.message.followUp": "shift+ctrl+s" }, true, "ctrl+s", "\x1b[115;5u"],
+  ["both reserved", { "tui.input.submit": "ctrl+s", "app.message.dequeue": "f2" }, false, undefined, "\x1bOQ"],
+] as const) {
+  test(`direct save hint is executable without replacing native actions: ${name}`, async () => {
+    const previousKitty = isKittyProtocolActive();
+    setKittyProtocolActive(kitty);
+    const keys = new KeybindingsManager(CHAT_KEYS, bindings as never);
+    const f = fixture(undefined, keys);
+    try {
+      await f.tui.waitForOpen();
+      assert.equal(
+        settingsChatSaveShortcut(keys as unknown as Parameters<typeof settingsChatSaveShortcut>[0]),
+        expected,
+      );
+      const frame = f.tui.render().join("\n");
+      if (!expected) {
+        assert.ok(!frame.includes("save profile"));
+        f.tui.send("\x03");
+        assert.equal(await f.running, "discard");
+      } else {
+        assert.ok(frame.includes(`${expected} save profile`));
+        assert.equal(matchesKey(packet, expected), true);
+        const paste = "line\n".repeat(40);
+        f.tui.send(`\x1b[200~${paste}\x1b[201~`);
+        f.tui.send(packet);
+        assert.equal(await f.running, "save");
+        assert.equal(f.state.input, paste);
+      }
+    } finally {
+      await f.dispose();
+      setKittyProtocolActive(previousKitty);
+    }
+  });
+}
+
+test("invalid drafts do not advertise or accept the save shortcut", async () => {
+  const f = fixture();
+  try {
+    await f.tui.waitForOpen();
+    await assert.rejects(
+      f.draft.tools[1].execute("invalid", { path: f.draft.path, content: "format = [" }),
+      /preview rejected/u,
+    );
+    assert.ok(!f.tui.render().join("\n").includes("save profile"));
+    f.tui.send("\x13");
+    assert.equal(f.tui.isOpen, true);
+    f.tui.send("\x03");
+    assert.equal(await f.running, "discard");
+  } finally {
+    await f.dispose();
+  }
+});
 
 test("steering precedes tool continuation; follow-up waits for natural completion with a stable request prefix", async () => {
   const stream = createAssistantMessageEventStream();

@@ -7,7 +7,7 @@ import { createTuiHarness } from "@narumitw/pi-tui-kit/testing";
 import { test } from "vitest";
 import { createMockContext, createMockPi } from "../../../test/support.js";
 import { showSettingsAgentChat } from "../src/command-settings-chat.js";
-import { registerStarshipCommand, type StarshipCommandOptions } from "../src/commands.js";
+import { handleStarshipCommand, registerStarshipCommand, type StarshipCommandOptions } from "../src/commands.js";
 import { type LoadedStarshipConfig, loadStarshipConfig } from "../src/config.js";
 import { createProfile, listHistory, listProfiles, readProfile } from "../src/profile-store.js";
 import { response, settingsChatCustom, testModel } from "./settings-chat-support.js";
@@ -15,6 +15,7 @@ import { response, settingsChatCustom, testModel } from "./settings-chat-support
 function fixture(
   original: string | null = "# retained\nformat = '$model'\n",
   overrides: Partial<StarshipCommandOptions> = {},
+  route: "chat" | "command" = "chat",
 ) {
   const root = mkdtempSync(join(tmpdir(), "starship-chat-command-"));
   const settingsPath = join(root, "pi-starship.toml");
@@ -25,11 +26,18 @@ function fixture(
   let cleanup: (() => Promise<void>) | undefined;
   const previews: Array<LoadedStarshipConfig | undefined> = [];
   const tui = createTuiHarness({ rows: 40 });
+  const listeners = new Set<(data: string) => unknown>();
   const context = createMockContext({
     mode: "tui",
     hasUI: true,
     custom: settingsChatCustom(tui.custom),
     model: { ...testModel, input: ["text"] },
+    onTerminalInput(listener: Parameters<ExtensionCommandContext["ui"]["onTerminalInput"]>[0]) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
   });
   const ctx = context.ctx as ExtensionCommandContext;
   ctx.ui.input = async () => "chat-draft";
@@ -76,10 +84,11 @@ function fixture(
     },
     ...overrides,
   };
-  const running = showSettingsAgentChat(ctx, options, {
-    signal: controller.signal,
-    isCurrent: () => !controller.signal.aborted,
-  });
+  const owner = { signal: controller.signal, isCurrent: () => !controller.signal.aborted };
+  const running =
+    route === "command"
+      ? handleStarshipCommand("", ctx, { ...options, getMenuOwner: () => owner })
+      : showSettingsAgentChat(ctx, options, owner);
   return {
     root,
     settingsPath,
@@ -102,22 +111,37 @@ function fixture(
     get cleanup() {
       return cleanup;
     },
+    sendRaw(data: string) {
+      for (const listener of [...listeners]) listener(data);
+      tui.send(data);
+    },
+    get inputListeners() {
+      return listeners.size;
+    },
     async submit() {
       await tui.waitForOpen();
+      if (route === "command") {
+        for (let index = 0; index < 7; index++) tui.press("tui.select.down");
+        tui.press("tui.select.confirm");
+        await tui.waitForOpen();
+      }
       tui.type("Show the directory");
       tui.send("\r");
       await tui.waitForPending();
     },
-    async chooseSave(continueReview = true) {
-      tui.send("\x1b");
-      await tui.waitForOpen();
-      const reviewFrame = tui.render();
-      assert.match(reviewFrame.join("\n"), /Save draft as profile/u);
-      const previewRow = reviewFrame.findIndex((line) => line.includes("LIVE FOOTER PREVIEW"));
-      assert.match(reviewFrame[previewRow - 1], /─ Preview/u);
-      assert.match(reviewFrame[previewRow + 1], /^─+$/u);
-      for (let index = 0; index < 3; index++) tui.press("tui.select.down");
-      tui.press("tui.select.confirm");
+    async chooseSave(continueReview = true, shortcut = false) {
+      if (shortcut) tui.send("\x13");
+      else {
+        tui.send("\x1b");
+        await tui.waitForOpen();
+        const reviewFrame = tui.render();
+        assert.match(reviewFrame.join("\n"), /Save draft as profile/u);
+        const previewRow = reviewFrame.findIndex((line) => line.includes("LIVE FOOTER PREVIEW"));
+        assert.match(reviewFrame[previewRow - 1], /─ Preview/u);
+        assert.match(reviewFrame[previewRow + 1], /^─+$/u);
+        for (let index = 0; index < 3; index++) tui.press("tui.select.down");
+        tui.press("tui.select.confirm");
+      }
       await tui.waitForOpen();
       assert.match(tui.render().join("\n"), /Review draft before saving/u);
       if (continueReview) tui.press("tui.select.confirm");
@@ -152,6 +176,48 @@ test("agent edits preview immediately; reviewed save creates a named profile bef
     await f.dispose();
   }
 });
+
+test("Ctrl+S enters exact review and named profile save directly without applying automatically", async () => {
+  const f = fixture(undefined, {}, "command");
+  f.ctx.ui.input = async () => "direct-save";
+  f.ctx.ui.confirm = async () => {
+    assert.equal(readProfile(f.settingsPath, "direct-save").rawDocument, "# retained\nformat = '$directory'\n");
+    return false;
+  };
+  try {
+    await f.submit();
+    assert.match(f.tui.render().join("\n"), /ctrl\+s save profile/u);
+    await f.chooseSave(true, true);
+    await f.running;
+    assert.equal(listProfiles(f.settingsPath).length, 1);
+    assert.equal(f.applied, 0);
+    assert.equal(f.previews.at(-1), undefined);
+    assert.equal(readFileSync(f.settingsPath, "utf8"), "# retained\nformat = '$model'\n");
+  } finally {
+    await f.dispose();
+  }
+});
+
+for (const replaced of [false, true]) {
+  test(`Ctrl+C through the command ${replaced ? "does not redraw a replaced session" : "restores the active footer"}`, async () => {
+    const f = fixture(undefined, {}, "command");
+    try {
+      await f.submit();
+      assert.match(f.previews.at(-1)?.rawDocument ?? "", /\$directory/u);
+      f.sendRaw("\x03");
+      if (replaced) f.controller.abort();
+      await f.running;
+      if (replaced) assert.ok(f.previews.at(-1));
+      else assert.equal(f.previews.at(-1), undefined);
+      assert.equal(f.applied, 0);
+      assert.equal(readFileSync(f.settingsPath, "utf8"), "# retained\nformat = '$model'\n");
+      assert.equal(f.inputListeners, 0);
+      assert.equal(existsSync(f.draftPath ?? ""), false);
+    } finally {
+      await f.dispose();
+    }
+  });
+}
 
 for (const reason of ["discard", "session replacement", "component disposal"] as const) {
   test(`${reason} releases draft and child without writing active settings`, async () => {

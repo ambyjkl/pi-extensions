@@ -76,25 +76,28 @@ export async function showSettingsAgentChat(
     while (owner.isCurrent()) {
       const action = await showSettingsChat(ctx, agent, draft, state, owner, preview);
       if (!owner.isCurrent() || action === "discard") return "close";
-      const result = await showPreviewActionMenu(
-        ctx,
-        "Configuration chat — preview only",
-        (width, theme) => [
-          "The agent has not changed the active settings file.",
-          "Preview uses cached data; enabling modules here does not run commands or network requests.",
-          ...renderSettingsChatPreview(width, preview(width), theme),
-          ...sanitizeTerminalDocument(draft.diagnostics).split("\n"),
-        ],
-        [
-          { value: "continue", label: "Continue conversation" },
-          { value: "document", label: "Review exact draft…" },
-          { value: "transcript", label: "Review full conversation…" },
-          ...(draft.candidate ? [{ value: "save" as const, label: "Save draft as profile…" }] : []),
-          { value: "discard", label: "Discard preview and close" },
-        ],
-        owner.signal,
-        owner.isCurrent,
-      );
+      const result =
+        action === "save"
+          ? { kind: "selected" as const, value: "save" as const }
+          : await showPreviewActionMenu(
+              ctx,
+              "Configuration chat — preview only",
+              (width, theme) => [
+                "The agent has not changed the active settings file.",
+                "Preview uses cached data; enabling modules here does not run commands or network requests.",
+                ...renderSettingsChatPreview(width, preview(width), theme),
+                ...sanitizeTerminalDocument(draft.diagnostics).split("\n"),
+              ],
+              [
+                { value: "continue", label: "Continue conversation" },
+                { value: "document", label: "Review exact draft…" },
+                { value: "transcript", label: "Review full conversation…" },
+                ...(draft.candidate ? [{ value: "save" as const, label: "Save draft as profile…" }] : []),
+                { value: "discard", label: "Discard preview and close" },
+              ],
+              owner.signal,
+              owner.isCurrent,
+            );
       if (!owner.isCurrent() || !result || result.kind === "closed") return "close";
       if (result?.kind !== "selected") continue;
       if (result.value === "discard") return "close";
@@ -161,9 +164,9 @@ export async function showSettingsAgentChat(
       await cleanup();
     } finally {
       unregister?.();
-      // A successful save changes the loaded revision, but clearing this workflow's preview
-      // is safe while the session still owns the serialized settings workflow.
-      if (!base.signal.aborted && base.isCurrent()) options.preview?.(undefined, ctx);
+      // Hard cancellation ends the command owner, not its session. Clear the owned
+      // preview even after Ctrl+C, but never redraw a replaced or shut-down session.
+      if (base.isSessionCurrent?.() ?? base.isCurrent()) options.preview?.(undefined, ctx);
     }
   }
 }
