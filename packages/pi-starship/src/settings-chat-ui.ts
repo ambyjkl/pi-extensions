@@ -68,6 +68,7 @@ export function settingsChatSaveShortcut(
 export interface ChatViewState {
   input: string;
   error: string;
+  toolsExpanded?: boolean;
 }
 
 /** Add labels only to the public Editor border hooks; native scroll indicators keep priority. */
@@ -204,7 +205,13 @@ export function createSettingsChatComponent(options: {
     if (!disposed && !signal.aborted) tui.requestRender();
   };
   // Update transcript identities before this listener requests the next frame.
-  const transcript = createSettingsChatTranscript(agent, tui, draft.directory);
+  const transcript = createSettingsChatTranscript(
+    agent,
+    tui,
+    draft.directory,
+    state.toolsExpanded ?? false,
+    draft.path,
+  );
   const unsubscribe = agent.subscribe((event) => {
     if (event.type === "message_start") {
       const index = queued.findIndex((item) => item.message === event.message);
@@ -277,7 +284,9 @@ export function createSettingsChatComponent(options: {
   editor.onSubmit = (input) => submit(input, "steer");
   editor.onAction("app.message.followUp", () => submit(editor.getExpandedText().trim(), "followUp"));
   editor.onAction("app.message.dequeue", restoreQueue);
-  editor.onAction("app.tools.expand", () => transcript.toggleTools());
+  editor.onAction("app.tools.expand", () => {
+    state.toolsExpanded = transcript.toggleTools();
+  });
   const dock: Component = {
     render(width: number): string[] {
       if (disposed || signal.aborted || width <= 0) return [];
@@ -335,6 +344,7 @@ export function createSettingsChatComponent(options: {
     invalidate() {
       transcript.invalidate();
     },
+    handleMouse: (event) => transcript.handleMouse(event),
   };
   const scroll = new SettingsChatScrollView(history, {
     primary: true,
@@ -414,6 +424,9 @@ export async function showSettingsChat(
   owner: WorkflowOwner,
   preview: (width: number) => string[],
 ): Promise<SettingsChatAction> {
+  // Seed this side thread once from the public parent display preference. Its
+  // later Ctrl+O changes remain local, including across review/name cancellation.
+  state.toolsExpanded ??= ctx.ui.getToolsExpanded?.() ?? false;
   return runSettingsChatFullscreen(
     ctx,
     owner,

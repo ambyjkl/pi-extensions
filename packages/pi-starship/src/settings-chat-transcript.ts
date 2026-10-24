@@ -1,26 +1,12 @@
 import { stripVTControlCharacters } from "node:util";
 import type { Agent, AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import {
-  AssistantMessageComponent,
-  createEditToolDefinition,
-  createReadToolDefinition,
-  createWriteToolDefinition,
-  ToolExecutionComponent,
-  UserMessageComponent,
-} from "@earendil-works/pi-coding-agent";
-import type { Component, TUI } from "@earendil-works/pi-tui";
+import { AssistantMessageComponent, UserMessageComponent } from "@earendil-works/pi-coding-agent";
+import type { Component, TUI, TuiMouseEvent } from "@earendil-works/pi-tui";
 import { sanitizeTerminalDocument } from "@narumitw/pi-tui-kit/terminal-document";
 
-/** Display-only copies keep terminal controls out of native renderers without changing agent history. */
-function displayValue<T>(value: T): T {
-  if (typeof value === "string") return sanitizeTerminalDocument(value) as T;
-  if (Array.isArray(value)) return value.map(displayValue) as T;
-  if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, displayValue(item)])) as T;
-  }
-  return value;
-}
+import { settingsChatDisplayValue as displayValue } from "./settings-chat-display.js";
+import { createSettingsChatTools } from "./settings-chat-tools.js";
 
 export interface SettingsChatAnchor {
   message: AgentMessage | symbol;
@@ -31,14 +17,15 @@ export interface SettingsChatAnchor {
 }
 
 /** Reuse Pi's public message components, not another extension's renderer or private settings. */
-export function createSettingsChatTranscript(agent: Agent, tui: TUI, cwd: string) {
+export function createSettingsChatTranscript(
+  agent: Agent,
+  tui: TUI,
+  cwd: string,
+  initialExpanded = false,
+  editablePath?: string,
+) {
   const messages = new Map<AgentMessage, Component>();
-  const tools = new Map<string, { component: ToolExecutionComponent; result?: AgentMessage }>();
-  const definitions = {
-    read: createReadToolDefinition(cwd),
-    write: createWriteToolDefinition(cwd),
-    edit: createEditToolDefinition(cwd),
-  };
+  const tools = createSettingsChatTools(tui, cwd, initialExpanded, editablePath);
   // Agent emits a new object for each partial update and another at finalization.
   // Keep one response identity across those events, including frames with no render.
   const identities = new WeakMap<AgentMessage, symbol>();
@@ -49,6 +36,8 @@ export function createSettingsChatTranscript(agent: Agent, tui: TUI, cwd: string
     identities.set(initial, streamingIdentity);
   }
   const unsubscribe = agent.subscribe((event) => {
+    if (disposed) return;
+    tools.onEvent(event);
     if (event.type === "agent_end") streamingIdentity = undefined;
     if (
       (event.type === "message_start" || event.type === "message_update" || event.type === "message_end") &&
@@ -62,13 +51,14 @@ export function createSettingsChatTranscript(agent: Agent, tui: TUI, cwd: string
   });
   let spans: Array<{ message: AgentMessage | symbol; start: number; end: number; offsets: number[]; text: string }> =
     [];
+  let toolSpans: Array<{ id: string; start: number; end: number }> = [];
   let renderedWidth = 0;
   let streaming: AssistantMessageComponent | undefined;
   let disposed = false;
-  let expanded = true;
   return {
     render(width: number): string[] {
       spans = [];
+      toolSpans = [];
       if (disposed || width <= 0) return [];
       const results = new Map(
         agent.state.messages.flatMap((message) =>
@@ -100,38 +90,9 @@ export function createSettingsChatTranscript(agent: Agent, tui: TUI, cwd: string
         for (const call of message.content) {
           if (call.type !== "toolCall") continue;
           activeTools.add(call.id);
-          let tool = tools.get(call.id);
-          if (!tool) {
-            const definition =
-              call.name === "read" || call.name === "write" || call.name === "edit"
-                ? definitions[call.name]
-                : undefined;
-            const component = new ToolExecutionComponent(
-              sanitizeTerminalDocument(call.name),
-              sanitizeTerminalDocument(call.id),
-              displayValue(call.arguments),
-              { showImages: false, outputPad: 1 },
-              definition,
-              tui,
-              sanitizeTerminalDocument(cwd),
-            );
-            component.setExpanded(expanded);
-            component.setArgsComplete();
-            component.markExecutionStarted();
-            tool = { component };
-            tools.set(call.id, tool);
-          }
-          const result = results.get(call.id);
-          if (result && tool.result !== result) {
-            tool.component.updateResult({
-              content: displayValue(result.content),
-              details: displayValue(result.details),
-              isError: result.isError,
-              durationMs: result.durationMs,
-            });
-            tool.result = result;
-          }
-          lines.push(...tool.component.render(width));
+          const start = lines.length;
+          lines.push(...tools.render(call, message, results.get(call.id), width));
+          toolSpans.push({ id: call.id, start, end: lines.length });
         }
       };
       for (const message of visible) {
@@ -166,14 +127,20 @@ export function createSettingsChatTranscript(agent: Agent, tui: TUI, cwd: string
       if (partial?.role === "assistant") {
         streaming ??= new AssistantMessageComponent(undefined, true);
         streaming.updateContent(displayValue(partial), true);
-        // Tool calls are rendered after finalization, not from incomplete streaming arguments.
         const start = lines.length;
-        lines.push(...streaming.render(width));
+        appendAssistant(partial, streaming);
         recordSpan(identities.get(partial) ?? partial, start);
       } else streaming = undefined;
       for (const message of messages.keys()) if (!activeMessages.has(message)) messages.delete(message);
-      for (const id of tools.keys()) if (!activeTools.has(id)) tools.delete(id);
+      tools.retain(activeTools);
       return lines;
+    },
+    handleMouse(event: TuiMouseEvent) {
+      if (disposed) return undefined;
+      const span = toolSpans.find((item) => event.y >= item.start && event.y < item.end);
+      return span
+        ? tools.handleMouse(span.id, { ...event, y: event.y - span.start, height: span.end - span.start })
+        : undefined;
     },
     anchorAt(row: number): SettingsChatAnchor | undefined {
       const span = spans.find((item) => row < item.end);
@@ -219,17 +186,14 @@ export function createSettingsChatTranscript(agent: Agent, tui: TUI, cwd: string
       return Math.max(0, span.start + Math.min(row, span.end - span.start - 1));
     },
     toggleTools() {
-      if (disposed) return;
-      expanded = !expanded;
-      for (const { component } of tools.values()) component.setExpanded(expanded);
-      tui.requestRender();
+      return tools.toggle();
     },
     invalidate() {
       if (disposed) return;
       // Native Markdown themes can retain concrete colors. Recreate display components
       // rather than retaining colors captured before a host theme change.
       messages.clear();
-      tools.clear();
+      tools.invalidate();
       streaming = undefined;
     },
     dispose() {
@@ -238,8 +202,9 @@ export function createSettingsChatTranscript(agent: Agent, tui: TUI, cwd: string
       unsubscribe();
       streamingIdentity = undefined;
       spans = [];
+      toolSpans = [];
       messages.clear();
-      tools.clear();
+      tools.dispose();
       streaming = undefined;
     },
   };

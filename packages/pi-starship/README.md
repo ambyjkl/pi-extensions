@@ -131,7 +131,8 @@ These tool limits are not an operating-system sandbox for extension code.
 The native editor retains editing, newline, submission, and large-paste behavior.
 While the agent runs, normal submission queues a steering message for the next assistant turn; `app.message.followUp` queues a message after the current task finishes.
 The default follow-up key is Alt+Enter, or Ctrl+Q on Windows and WSL; when idle, it submits normally.
-Tool output starts expanded. Press Ctrl+O to collapse or expand all tool output in this conversation; this follows Pi's `app.tools.expand` keybinding and does not change the main conversation.
+Tool output starts with the main conversation's current expansion setting (collapsed by default in Pi). Ctrl+O follows `app.tools.expand` and changes only this side thread; its setting is retained when returning from review or profile naming. Completed tool blocks also support native click-to-toggle behavior.
+Tool arguments, progress, results, errors, and edit previews use Pi's built-in read/write/edit renderers and lifecycle. Edit previews can read only the owned draft. Native renderer rules still apply: Ctrl+O does not force an edit diff to collapse if Pi's edit renderer keeps it visible.
 Pending messages appear in gray above the editor, with a count on its upper border; the view shows at most three pending rows.
 Use `app.message.dequeue` (Alt+Up, or Alt+Q on Windows and WSL) to restore queued messages to the editor.
 These message shortcuts use Pi's configured bindings and native precedence, including explicit history actions taking priority.
@@ -147,7 +148,7 @@ The editor retains its native editing bindings; native viewport actions take pri
 Short gray labels on the editor borders show draft status and controls.
 The full-width preview has no extra separator, with its last line at the terminal bottom, matching the saved footer's position.
 At short heights, error details yield first; if the whole preview cannot fit beside the editor, it is hidden rather than clipped.
-The view shows recent output with expanded, read-only tool results.
+The view shows recent output with read-only tool results and the current local expansion setting.
 Choose **Continue** in the exact-draft save review; cancelling discards the temporary draft but keeps any previously saved profile.
 
 **The agent never writes the active settings file or profiles.** When idle with a valid draft, press **Ctrl+S** to save it as a profile; the gray editor-border hint shows the active save key.

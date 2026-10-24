@@ -53,6 +53,7 @@ function fixture(
     response([{ type: "text", text: "Preview updated\x1b]52;c;secret\x07" }]),
   keys = new KeybindingsManager(CHAT_KEYS),
   preview = () => ["FOOTER PREVIEW"],
+  toolsExpanded = false,
 ) {
   const root = mkdtempSync(join(tmpdir(), "starship-ui-test-"));
   const controller = new AbortController();
@@ -73,6 +74,7 @@ function fixture(
     hasUI: true,
     custom: settingsChatCustom(tui.custom, (options) => overlayOptions.push(options)),
   }).ctx as ExtensionCommandContext;
+  ctx.ui.getToolsExpanded = () => toolsExpanded;
   const state = { input: "", error: "" };
   const running = showSettingsChat(
     ctx,
@@ -84,6 +86,7 @@ function fixture(
   );
   return {
     root,
+    ctx,
     controller,
     draft,
     agent,
@@ -207,19 +210,18 @@ for (const [name, configured, packet, kitty] of [
         isError: false,
         timestamp: 1,
       });
+      assert.doesNotMatch(f.tui.render().join("\n"), /output-19/u);
+      f.tui.send(packet);
       const expanded = f.tui.render().join("\n");
       assert.match(expanded, /output-19/u);
-      f.tui.send(packet);
-      const collapsed = f.tui.render().join("\n");
-      assert.doesNotMatch(collapsed, /output-19/u);
       f.tui.invalidate();
-      assert.equal(f.tui.render().join("\n"), collapsed);
+      assert.equal(f.tui.render().join("\n"), expanded);
       f.tui.send("\x1b[200~");
       f.tui.send(packet);
-      assert.doesNotMatch(f.tui.render().join("\n"), /output-19/u);
+      assert.match(f.tui.render().join("\n"), /output-19/u);
       f.tui.send("\x1b[201~");
       f.tui.send(packet);
-      assert.match(f.tui.render().join("\n"), /output-19/u);
+      assert.doesNotMatch(f.tui.render().join("\n"), /output-19/u);
       f.tui.send("\x03");
       assert.equal(await f.running, "discard");
     } finally {
@@ -228,6 +230,84 @@ for (const [name, configured, packet, kitty] of [
     }
   });
 }
+
+for (const initial of [false, true]) {
+  test(`tool expansion starts from parent=${initial} and stays local across chat reopening`, async () => {
+    const f = fixture(undefined, undefined, undefined, initial);
+    const assistant = await response(
+      [{ type: "toolCall", id: "local", name: "read", arguments: { path: "local.toml" } }],
+      "toolUse",
+    ).result();
+    try {
+      await f.tui.waitForOpen();
+      f.agent.state.messages.push(assistant, {
+        role: "toolResult",
+        toolCallId: "local",
+        toolName: "read",
+        content: [{ type: "text", text: "local tool output" }],
+        isError: false,
+        timestamp: 0,
+      });
+      assert.equal(f.tui.render().join("\n").includes("local tool output"), initial);
+      f.tui.send("\x0f");
+      assert.equal(f.tui.render().join("\n").includes("local tool output"), !initial);
+      assert.equal(f.ctx.ui.getToolsExpanded(), initial);
+      f.tui.send("\x13");
+      assert.equal(await f.running, "save");
+      const reopened = showSettingsChat(
+        f.ctx,
+        f.agent,
+        f.draft,
+        f.state,
+        { signal: f.controller.signal, isCurrent: () => !f.controller.signal.aborted },
+        () => ["FOOTER PREVIEW"],
+      );
+      await f.tui.waitForOpen();
+      assert.equal(f.tui.render().join("\n").includes("local tool output"), !initial);
+      f.tui.send("\x03");
+      assert.equal(await reopened, "discard");
+    } finally {
+      await f.dispose();
+    }
+  });
+}
+
+test("native tool result clicks expand one row and survive theme invalidation", async () => {
+  const f = fixture();
+  const calls = ["first.toml", "second.toml"].map((path) => ({
+    type: "toolCall" as const,
+    id: path,
+    name: "read",
+    arguments: { path },
+  }));
+  const assistant = await response(calls, "toolUse").result();
+  try {
+    await f.tui.waitForOpen();
+    f.agent.state.messages.push(
+      assistant,
+      ...calls.map((call) => ({
+        role: "toolResult" as const,
+        toolCallId: call.id,
+        toolName: "read",
+        content: [{ type: "text" as const, text: `contents of ${call.id}` }],
+        isError: false,
+        timestamp: 0,
+      })),
+    );
+    const before = f.tui.render();
+    const row = before.findIndex((line) => line.includes("first.toml"));
+    f.tui.mouse({ type: "click", x: 1, y: row });
+    assert.match(f.tui.render().join("\n"), /contents of first.toml/u);
+    assert.doesNotMatch(f.tui.render().join("\n"), /contents of second.toml/u);
+    f.tui.invalidate();
+    assert.match(f.tui.render().join("\n"), /contents of first.toml/u);
+    assert.doesNotMatch(f.tui.render().join("\n"), /contents of second.toml/u);
+    f.tui.send("\x0f");
+    assert.match(f.tui.render().join("\n"), /contents of second.toml/u);
+  } finally {
+    await f.dispose();
+  }
+});
 
 for (const appended of [1, 5, 30]) {
   test(`history keeps retained content stable after ${appended} message evictions`, async () => {

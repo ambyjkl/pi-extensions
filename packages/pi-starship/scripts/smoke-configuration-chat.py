@@ -39,17 +39,27 @@ export default function(pi) {
     };
   }
   pi.on('session_start', (_event, ctx) => {
-    ctx.modelRegistry.streamSimple = () => {
+    let step = 0;
+    ctx.modelRegistry.streamSimple = (_model, request) => {
       const stream = createAssistantMessageEventStream();
+      const prompt = request.messages.find((item) => item.role === 'system')?.content;
+      const path = typeof prompt === 'string' ? /Draft path: ([^\\n]+)/.exec(prompt)?.[1] : undefined;
+      if (!path) throw new Error('Missing isolated draft path');
+      const calls = [
+        {type: 'toolCall', id: 'smoke-write', name: 'write', arguments: {path, content: "format = '$directory'\\n"}},
+        {type: 'toolCall', id: 'smoke-edit', name: 'edit', arguments: {path, edits: [{oldText: '$directory', newText: '$model'}]}},
+        {type: 'toolCall', id: 'smoke-read', name: 'read', arguments: {path}},
+      ];
+      const call = calls[step++];
       const message = {
         role: 'assistant',
-        content: [{type: 'text', text: Array.from({length: 120}, (_, i) => `pty-row-${i}`).join('\\n')}],
+        content: call ? [call] : [{type: 'text', text: Array.from({length: 120}, (_, i) => `pty-row-${i}`).join('\\n')}],
         api: 'openai-completions', provider: 'openai', model: 'gpt-4o',
         usage: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
           cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0}},
-        stopReason: 'stop', timestamp: 0,
+        stopReason: call ? 'toolUse' : 'stop', timestamp: 0,
       };
-      stream.push({type: 'done', reason: 'stop', message});
+      stream.push({type: 'done', reason: message.stopReason, message});
       return stream;
     };
     writeFileSync('ready', 'ready');
@@ -141,6 +151,12 @@ def smoke(mode, fixture):
         output.clear()
         os.write(master, b"Generate history\r")
         until(lambda: "pty-row-119" in text(), "deterministic response", deadline)
+        output.clear()
+        os.write(master, b"\x1b[1;5H")
+        until(lambda: "+1 format" in text(), "native completed edit diff", deadline)
+        output.clear()
+        os.write(master, b"\x1b[1;5F")
+        until(lambda: "pty-row-119" in text(), "return to history end", deadline)
         output.clear()
         os.write(master, b"\x1b[5~")
         until(lambda: "pty-row-" in text(), "native page-up redraw", deadline)

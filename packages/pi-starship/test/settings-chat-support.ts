@@ -61,6 +61,7 @@ export function settingsChatCustom(
         handleMouse(event) {
           const button = event.type === "wheel" ? (event.wheelDelta && event.wheelDelta < 0 ? 64 : 65) : 0;
           terminal.input(`\x1b[<${button};${event.x + 1};${event.y + 1}M`);
+          if (event.type === "click") terminal.input(`\x1b[<${button};${event.x + 1};${event.y + 1}m`);
           return { handled: true };
         },
         invalidate() {

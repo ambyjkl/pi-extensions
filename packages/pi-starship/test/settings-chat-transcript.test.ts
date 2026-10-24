@@ -16,13 +16,13 @@ import { response, testModel } from "./settings-chat-support.js";
 
 initTheme("dark", false);
 const cwd = "/private-settings-draft";
-function fixture(messages: AgentMessage[]) {
+function fixture(messages: AgentMessage[], expanded = true) {
   const agent = new Agent({
     initialState: { model: { ...testModel, input: ["text"] }, messages },
     streamFn: () => response([]),
   });
   const tui = { terminal: { rows: 24, columns: 80 }, requestRender() {} } as TUI;
-  return { agent, tui, transcript: createSettingsChatTranscript(agent, tui, cwd) };
+  return { agent, tui, transcript: createSettingsChatTranscript(agent, tui, cwd, expanded) };
 }
 
 test("user and assistant blocks exactly reuse native Markdown, backgrounds, padding, and later-question spacing", async () => {
