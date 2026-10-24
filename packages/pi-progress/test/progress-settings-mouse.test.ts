@@ -65,6 +65,21 @@ for (const width of [1, 2, 3]) {
   });
 }
 
+for (const width of [1, 2, 3]) {
+  test(`row metadata at width ${width} survives height changes and invalidation`, async (t) => {
+    const screen = await openSettings(t, 4, width);
+    screen.tui.press("tui.select.down");
+    for (const rows of [24, 7, 4]) {
+      screen.tui.resize({ rows });
+      screen.tui.invalidate();
+      screen.frame();
+    }
+    screen.tui.mouse({ type: "click", x: 0, y: 0 });
+    await vi.waitFor(() => assert.equal(screen.settings().displayMode, "expanded"));
+    assert.deepEqual(screen.save.mock.calls[0]?.[0], { displayMode: "expanded" });
+  });
+}
+
 test("header, borders, descriptions, hints, hover, and secondary buttons do not change settings", async (t) => {
   const screen = await openSettings(t);
   const lines = screen.frame();

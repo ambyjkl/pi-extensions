@@ -10,6 +10,8 @@ import {
   ModelRegistry,
   ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
+import { getKeybindings } from "@earendil-works/pi-tui";
+import { createTuiHarness } from "@narumitw/pi-tui-kit/testing";
 import { afterEach, test, vi } from "vitest";
 import { createCustomSelectorHarness, createMockContext, createMockPi } from "../../../test/support.js";
 import { createUsageSettingsRuntime } from "../src/settings.js";
@@ -513,17 +515,31 @@ test("real Pi resolves companion OAuth but never reuses it after a runtime API-k
   }
 });
 
+type SettingsHarness = {
+  handleInput(data: string): unknown;
+  render(): readonly string[];
+  dispose(): void;
+};
+
 async function settingsCommand(
   state: Awaited<ReturnType<typeof setup>>,
-  change: (harness: ReturnType<typeof createCustomSelectorHarness>) => Promise<void>,
+  change: (harness: SettingsHarness) => Promise<void>,
 ) {
   let opened = false;
   Object.assign(state.context.ctx.ui, {
     custom: async (factory: unknown) => {
-      const harness = createCustomSelectorHarness(factory, 120, undefined, 35);
+      const tui = createTuiHarness({ width: 120, rows: 35, keybindings: getKeybindings() });
+      let kitScreen = false;
+      const running = tui.custom(async (...args) => {
+        const component = await (factory as Parameters<typeof tui.custom>[0])(...args);
+        kitScreen = "__piTuiKitScreen" in component && component.__piTuiKitScreen === true;
+        return component;
+      });
+      const harness: SettingsHarness = { handleInput: tui.send, render: tui.render, dispose: tui.dispose };
       try {
+        await tui.waitForOpen();
         const text = harness.render().join("\n");
-        if (harness.isPiTuiKitScreen) {
+        if (kitScreen) {
           state.titles.push(text);
           if (!opened) {
             opened = true;
@@ -535,7 +551,7 @@ async function settingsCommand(
           await change(harness);
           harness.handleInput("\u0003");
         }
-        return await harness.resultPromise;
+        return await running;
       } finally {
         harness.dispose();
       }
@@ -638,7 +654,7 @@ for (const boundary of ["normal", "cancel-after-publication", "dispose-after-pub
     });
     let observedSignal: AbortSignal | undefined;
     const originalUpdate = state.runtime.update;
-    let activeHarness: ReturnType<typeof createCustomSelectorHarness> | undefined;
+    let activeHarness: SettingsHarness | undefined;
     let delayed = false;
     let disabled = false;
     let cleared = false;
@@ -782,7 +798,7 @@ for (const handoff of ["event", "cancel-after-publication", "dispose-after-publi
       await response;
       return new Response(JSON.stringify(apps));
     });
-    let activeHarness: ReturnType<typeof createCustomSelectorHarness> | undefined;
+    let activeHarness: SettingsHarness | undefined;
     vi.spyOn(state.runtime, "update").mockImplementation(async (patch, signal) => {
       if (patch.openaiUseCodexUsage === false && handoff === "event") {
         state.companion({ ...codex, access: access("rotated"), accountId: "rotated" });

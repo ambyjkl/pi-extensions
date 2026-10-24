@@ -2603,7 +2603,7 @@ test("the TUI SettingsList describes and applies usage preferences immediately",
     hasUI: true,
     mode: "tui",
     custom: async (factory: unknown) =>
-      new Promise<boolean>((resolve) => {
+      new Promise<boolean>((resolve, reject) => {
         let component: {
           dispose?(): void;
           handleInput(data: string): void;
@@ -2613,33 +2613,39 @@ test("the TUI SettingsList describes and applies usage preferences immediately",
           component.dispose?.();
           resolve(value);
         };
-        component = (
-          factory as (
-            tui: { requestRender(): void },
-            theme: {
-              bold(text: string): string;
-              fg(_color: string, text: string): string;
-            },
-            keybindings: object,
-            done: (value: boolean) => void,
-          ) => typeof component
-        )(
-          { requestRender: () => rendered.push(component.render(100)) },
-          { bold: (text) => text, fg: (_color, text) => text },
-          remappedKeybindings,
-          done,
-        );
-        rendered.push(component.render(100));
-        component.handleInput("x");
-        setImmediate(() => {
-          component.handleInput("j");
-          component.handleInput("x");
-          setImmediate(() => {
-            component.handleInput("j");
+        void Promise.resolve(
+          (
+            factory as (
+              tui: { requestRender(): void },
+              theme: {
+                bold(text: string): string;
+                fg(_color: string, text: string): string;
+              },
+              keybindings: object,
+              done: (value: boolean) => void,
+            ) => typeof component
+          )(
+            { requestRender: () => rendered.push(component.render(100)) },
+            { bold: (text) => text, fg: (_color, text) => text },
+            remappedKeybindings,
+            done,
+          ),
+        )
+          .then((created) => {
+            component = created;
+            rendered.push(component.render(100));
             component.handleInput("x");
-            setImmediate(() => component.handleInput("q"));
-          });
-        });
+            setImmediate(() => {
+              component.handleInput("j");
+              component.handleInput("x");
+              setImmediate(() => {
+                component.handleInput("j");
+                component.handleInput("x");
+                setImmediate(() => component.handleInput("q"));
+              });
+            });
+          })
+          .catch(reject);
       }),
   });
 
@@ -2681,7 +2687,7 @@ test("the Settings frame respects the live terminal row budget", async () => {
     hasUI: true,
     mode: "tui",
     custom: async (factory: unknown) =>
-      new Promise<boolean>((resolve) => {
+      new Promise<boolean>((resolve, reject) => {
         let component: {
           dispose?(): void;
           handleInput(data: string): void;
@@ -2691,29 +2697,35 @@ test("the Settings frame respects the live terminal row budget", async () => {
           component.dispose?.();
           resolve(value);
         };
-        component = (
-          factory as (
-            tui: { terminal: { rows: number }; requestRender(): void },
-            theme: {
-              bold(text: string): string;
-              fg(_color: string, text: string): string;
-            },
-            keybindings: object,
-            done: (value: boolean) => void,
-          ) => typeof component
-        )(
-          { terminal, requestRender() {} },
-          { bold: (text) => text, fg: (_color, text) => text },
-          { matches: () => false },
-          done,
-        );
-        full = component.render(100);
-        terminal.rows = 12;
-        constrained = component.render(20);
-        terminal.rows = 4;
-        component.handleInput("\u001b[B");
-        tiny = component.render(20);
-        component.handleInput("\u0003");
+        void Promise.resolve(
+          (
+            factory as (
+              tui: { terminal: { rows: number }; requestRender(): void },
+              theme: {
+                bold(text: string): string;
+                fg(_color: string, text: string): string;
+              },
+              keybindings: object,
+              done: (value: boolean) => void,
+            ) => typeof component
+          )(
+            { terminal, requestRender() {} },
+            { bold: (text) => text, fg: (_color, text) => text },
+            { matches: () => false },
+            done,
+          ),
+        )
+          .then((created) => {
+            component = created;
+            full = component.render(100);
+            terminal.rows = 12;
+            constrained = component.render(20);
+            terminal.rows = 4;
+            component.handleInput("\u001b[B");
+            tiny = component.render(20);
+            component.handleInput("\u0003");
+          })
+          .catch(reject);
       }),
   });
 
@@ -2757,7 +2769,7 @@ test("Ctrl+C hard-cancels Settings before conflicting configurable actions", asy
     hasUI: true,
     mode: "tui",
     custom: async (factory: unknown) =>
-      new Promise<boolean>((resolve) => {
+      new Promise<boolean>((resolve, reject) => {
         let component: {
           dispose?(): void;
           handleInput(data: string): void;
@@ -2767,19 +2779,25 @@ test("Ctrl+C hard-cancels Settings before conflicting configurable actions", asy
           component.dispose?.();
           resolve(value);
         };
-        component = (
-          factory as (
-            tui: { requestRender(): void },
-            theme: {
-              bold(text: string): string;
-              fg(_color: string, text: string): string;
-            },
-            keybindings: object,
-            done: (value: boolean) => void,
-          ) => typeof component
-        )({ requestRender() {} }, { bold: (text) => text, fg: (_color, text) => text }, conflictingKeybindings, done);
-        component.handleInput("\u0003");
-        component.handleInput("q");
+        void Promise.resolve(
+          (
+            factory as (
+              tui: { requestRender(): void },
+              theme: {
+                bold(text: string): string;
+                fg(_color: string, text: string): string;
+              },
+              keybindings: object,
+              done: (value: boolean) => void,
+            ) => typeof component
+          )({ requestRender() {} }, { bold: (text) => text, fg: (_color, text) => text }, conflictingKeybindings, done),
+        )
+          .then((created) => {
+            component = created;
+            component.handleInput("\u0003");
+            component.handleInput("q");
+          })
+          .catch(reject);
       }),
   });
 
@@ -2804,7 +2822,7 @@ test("Ctrl+C hard-cancels Settings before conflicting configurable actions", asy
   assert.equal(applied, 0);
 });
 
-test("settings cancellation aborts a stalled save and closes without awaiting it", async (t) => {
+test("settings cancellation aborts and drains a cooperative stalled save", async (t) => {
   const previousKeybindings = getKeybindings();
   const remappedKeybindings = new KeybindingsManager(TUI_KEYBINDINGS, {
     "tui.select.cancel": "q",
@@ -2824,9 +2842,14 @@ test("settings cancellation aborts a stalled save and closes without awaiting it
     });
     settings.runtime.update = async (_patch, signal) => {
       markStarted();
-      if (signal?.aborted) markAborted();
-      else signal?.addEventListener("abort", markAborted, { once: true });
-      return new Promise<UsageSettingsState>(() => undefined);
+      return new Promise<UsageSettingsState>((_resolve, reject) => {
+        const abort = () => {
+          markAborted();
+          reject(signal?.reason);
+        };
+        if (signal?.aborted) abort();
+        else signal?.addEventListener("abort", abort, { once: true });
+      });
     };
     const parentController = new AbortController();
     let markReady: (component: { handleInput(data: string): void; render(width: number): string[] }) => void = () =>
@@ -2841,7 +2864,7 @@ test("settings cancellation aborts a stalled save and closes without awaiting it
       hasUI: true,
       mode: "tui",
       custom: async (factory: unknown) =>
-        new Promise<boolean>((resolve) => {
+        new Promise<boolean>((resolve, reject) => {
           let component: {
             dispose?(): void;
             handleInput(data: string): void;
@@ -2851,18 +2874,24 @@ test("settings cancellation aborts a stalled save and closes without awaiting it
             component.dispose?.();
             resolve(value);
           };
-          component = (
-            factory as (
-              tui: { requestRender(): void },
-              theme: {
-                bold(text: string): string;
-                fg(_color: string, text: string): string;
-              },
-              keybindings: object,
-              done: (value: boolean) => void,
-            ) => typeof component
-          )({ requestRender() {} }, { bold: (text) => text, fg: (_color, text) => text }, remappedKeybindings, done);
-          markReady(component);
+          void Promise.resolve(
+            (
+              factory as (
+                tui: { requestRender(): void },
+                theme: {
+                  bold(text: string): string;
+                  fg(_color: string, text: string): string;
+                },
+                keybindings: object,
+                done: (value: boolean) => void,
+              ) => typeof component
+            )({ requestRender() {} }, { bold: (text) => text, fg: (_color, text) => text }, remappedKeybindings, done),
+          )
+            .then((created) => {
+              component = created;
+              markReady(component);
+            })
+            .catch(reject);
         }),
     });
 
@@ -2901,7 +2930,7 @@ test("a durable settings save still applies lifecycle cleanup when disposal wins
     hasUI: true,
     mode: "tui",
     custom: async (factory: unknown) =>
-      new Promise<boolean>((resolve) => {
+      new Promise<boolean>((resolve, reject) => {
         let component: {
           dispose?(): void;
           handleInput(data: string): void;
@@ -2911,19 +2940,30 @@ test("a durable settings save still applies lifecycle cleanup when disposal wins
           component.dispose?.();
           resolve(value);
         };
-        component = (
-          factory as (
-            tui: { requestRender(): void },
-            theme: {
-              bold(text: string): string;
-              fg(_color: string, text: string): string;
-            },
-            keybindings: object,
-            done: (value: boolean) => void,
-          ) => typeof component
-        )({ requestRender() {} }, { bold: (text) => text, fg: (_color, text) => text }, { matches: () => false }, done);
-        component.handleInput("\u001b[B");
-        component.handleInput("\r");
+        void Promise.resolve(
+          (
+            factory as (
+              tui: { requestRender(): void },
+              theme: {
+                bold(text: string): string;
+                fg(_color: string, text: string): string;
+              },
+              keybindings: object,
+              done: (value: boolean) => void,
+            ) => typeof component
+          )(
+            { requestRender() {} },
+            { bold: (text) => text, fg: (_color, text) => text },
+            { matches: () => false },
+            done,
+          ),
+        )
+          .then((created) => {
+            component = created;
+            component.handleInput("\u001b[B");
+            component.handleInput("\r");
+          })
+          .catch(reject);
       }),
   });
 
@@ -2948,7 +2988,7 @@ test("the TUI SettingsList rolls back a Codex percentage change after save failu
     hasUI: true,
     mode: "tui",
     custom: async (factory: unknown) =>
-      new Promise<boolean>((resolve) => {
+      new Promise<boolean>((resolve, reject) => {
         let component: {
           dispose?(): void;
           handleInput(data: string): void;
@@ -2959,26 +2999,32 @@ test("the TUI SettingsList rolls back a Codex percentage change after save failu
           component.dispose?.();
           resolve(value);
         };
-        component = (
-          factory as (
-            tui: { requestRender(): void },
-            theme: {
-              bold(text: string): string;
-              fg(_color: string, text: string): string;
-            },
-            keybindings: object,
-            done: (value: boolean) => void,
-          ) => typeof component
-        )(
-          { requestRender: () => (latest = component.render(100)) },
-          { bold: (text) => text, fg: (_color, text) => text },
-          { matches: () => false },
-          done,
-        );
-        component.handleInput("\u001b[B");
-        component.handleInput("\u001b[B");
-        component.handleInput("\r");
-        setImmediate(() => component.handleInput("\u0003"));
+        void Promise.resolve(
+          (
+            factory as (
+              tui: { requestRender(): void },
+              theme: {
+                bold(text: string): string;
+                fg(_color: string, text: string): string;
+              },
+              keybindings: object,
+              done: (value: boolean) => void,
+            ) => typeof component
+          )(
+            { requestRender: () => (latest = component.render(100)) },
+            { bold: (text) => text, fg: (_color, text) => text },
+            { matches: () => false },
+            done,
+          ),
+        )
+          .then((created) => {
+            component = created;
+            component.handleInput("\u001b[B");
+            component.handleInput("\u001b[B");
+            component.handleInput("\r");
+            setImmediate(() => component.handleInput("\u0003"));
+          })
+          .catch(reject);
       }),
   });
 
