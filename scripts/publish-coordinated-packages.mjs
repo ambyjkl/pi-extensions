@@ -161,9 +161,13 @@ export function sanitizeRegistryDiagnostic(value) {
   let normalized = String(value);
   for (let pass = 0; pass < 8; pass++) {
     const decoded = normalized
-      .replace(/\\+u([a-f0-9]{4})/giu, (_, hex) => String.fromCharCode(Number.parseInt(hex, 16)))
-      .replace(/\\+[nrtbf]/gu, " ")
-      .replace(/\\+(["'/:=])/gu, "$1");
+      // The optional suffix makes unmatched runs succeed too. Each run is
+      // consumed once instead of retrying a required suffix at every backslash.
+      .replace(/\\+(?:[uU]([a-fA-F0-9]{4})|([nrtbf"'/:=]))?/gu, (run, hex, delimiter) => {
+        if (hex !== undefined) return String.fromCharCode(Number.parseInt(hex, 16));
+        if (delimiter !== undefined) return "nrtbf".includes(delimiter) ? " " : delimiter;
+        return run;
+      });
     if (decoded === normalized) break;
     normalized = decoded;
   }
@@ -172,6 +176,8 @@ export function sanitizeRegistryDiagnostic(value) {
   const safe = stripVTControlCharacters(normalized)
     // biome-ignore lint/suspicious/noControlCharactersInRegex: Remove untrusted terminal controls from diagnostic output.
     .replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/gu, "")
+    // The legacy Actions parser accepts its prefix anywhere in a line.
+    .replaceAll("##[", "## [")
     // Conservatively omit the rest of a field after credentials: npm can return
     // incomplete, escaped, or multiline values without a reliable closing delimiter.
     .replace(
@@ -191,7 +197,8 @@ function registryDiagnostic(context, result, disposition, error) {
   if (error !== undefined) lines.push(`Reason: ${error instanceof Error ? error.message : String(error)}`);
   if (result?.stdout) lines.push(`stdout: ${result.stdout}`);
   if (result?.stderr) lines.push(`stderr: ${result.stderr}`);
-  // Prefix every line so untrusted npm output cannot become an Actions command.
+  // Prefix every line to block modern Actions commands. The sanitizer removes
+  // legacy prefixes because the runner accepts them anywhere in a line.
   return lines
     .map((line) => sanitizeRegistryDiagnostic(line))
     .join("\n")

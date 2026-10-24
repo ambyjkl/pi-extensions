@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -20,7 +21,7 @@ function fixture(options?: Parameters<typeof publishFixture>[0]) {
 }
 const failure = (code = "E404") => ({
   code: 1,
-  stdout: JSON.stringify({ error: { code, summary: "registry response" } }),
+  stdout: JSON.stringify({ error: { code, summary: "registry response ##[warning]injected" } }),
   stderr: "npm error: registry response",
 });
 
@@ -57,6 +58,98 @@ for (const input of [
     assert.match(output, /REDACTED/u);
   });
 }
+
+// Relevant activation branches from actions/runner at
+// f4a774978d9562d6539be5055c17c0eb970d08df: ActionCommand.TryParseV2,
+// ActionCommand.TryParse, and ActionCommandManager.TryProcessCommand.
+// Data/property unescaping occurs after activation and cannot affect this check.
+function runnerCommand(line: string) {
+  const registered = new Set(["error", "warning", "add-mask", "stop-commands", "resume-token"]);
+  const modern = line.trimStart();
+  if (modern.startsWith("::")) {
+    const end = modern.indexOf("::", 2);
+    if (end >= 0 && registered.has(modern.slice(2, end).split(" ")[0]?.toLowerCase() ?? "")) return true;
+  }
+  const start = line.indexOf("##[");
+  if (start < 0) return false;
+  const end = line.indexOf("]", start);
+  return (
+    end >= 0 &&
+    registered.has(
+      line
+        .slice(start + 3, end)
+        .split(" ")[0]
+        ?.toLowerCase() ?? "",
+    )
+  );
+}
+
+for (const [input, active] of [
+  ["::error::injected", true],
+  ["  ::warning file=a,line=1::injected", true],
+  ["##[error]injected", true],
+  ["prefix ##[WaRnInG file=a;line=1]injected", true],
+  ["prefix ##[add-mask]injected", true],
+  ["prefix ##[stop-commands]resume-token", true],
+  ["prefix ##[resume-token]", true],
+  ["prefix ::error::ignored ##[error]injected", true],
+  ["##[error]first ##[warning]second", true],
+  ["####[error]injected", true],
+  ["prefix ::error::not a command", false],
+  ["##[unknown]ignored ##[error]not parsed", false],
+  ["##[error", false],
+  ["::error", false],
+  [String.raw`\u0023\u0023\u005berror]injected`, false],
+  ["#\x1b[31m#[error]injected", false],
+] as const) {
+  test(`diagnostics block both Actions parser branches: ${input}`, () => {
+    assert.equal(runnerCommand(input), active, "the parser model must recognize the raw branch");
+    const safe = `[registry] ${sanitizeRegistryDiagnostic(input)}`;
+    assert.equal(runnerCommand(safe), false);
+    assert.doesNotMatch(safe, /##\[/u);
+  });
+}
+
+test("escape normalization handles the subprocess output limit without blocking", async () => {
+  const moduleUrl = pathToFileURL(path.join(process.cwd(), "scripts/publish-coordinated-packages.mjs")).href;
+  const child = spawn(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `
+    import { sanitizeRegistryDiagnostic } from ${JSON.stringify(moduleUrl)};
+    process.once("message", () => {
+      const run = String.fromCharCode(92).repeat(4 * 1024 * 1024);
+      for (const suffix of ["", "z", "u12ZZ", "u1234", "n", '"']) sanitizeRegistryDiagnostic(run + suffix);
+      process.send("done");
+      process.disconnect();
+    });
+    process.send("ready");
+  `,
+    ],
+    { stdio: ["ignore", "ignore", "inherit", "ipc"] },
+  );
+  const closed = new Promise<void>((resolve) => child.once("close", () => resolve()));
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", (code) => reject(new Error(`Diagnostic child exited before completion: ${code}`)));
+      child.on("message", (message) => {
+        if (message === "ready") {
+          // The safety deadline starts only after module import and readiness.
+          timer = setTimeout(() => reject(new Error("Escape normalization blocked the diagnostic child.")), 3_000);
+          child.send?.("run");
+        } else if (message === "done") resolve();
+      });
+    });
+  } finally {
+    clearTimeout(timer);
+    child.kill("SIGKILL");
+    await closed;
+  }
+});
 
 test("deeply nested escapes omit output instead of exposing credentials", () => {
   let encoded = String.raw`\u0070assword="private-value"`;
@@ -104,11 +197,13 @@ for (const stage of ["query version", "query tarball URL", "download tarball"]) 
         assert.match(error.message, /stdout: .*registry response/u);
         assert.match(error.message, /stderr: npm error: registry response/u);
         assert.match(error.message, /stop/u);
+        assert.doesNotMatch(error.message, /##\[/u);
         return true;
       },
     );
     assert.equal(failures, stage === "query version" ? 1 : 6);
     for (const cache of caches) assert.equal(existsSync(cache), false);
+    for (const log of logs) assert.doesNotMatch(log, /##\[/u);
     if (stage !== "query version") {
       assert.ok(logs.some((line) => line.includes("attempt: 1/6; retry in 2000 ms")));
       assert.ok(logs.some((line) => line.includes("attempt: 6/6; stop")));
@@ -171,7 +266,7 @@ for (const operation of ["version", "dist.tarball", "pack"]) {
           return {
             code: 0,
             stdout: "not JSON token=private-value",
-            stderr: "npm error\n::error::injected\nAuthorization: Bearer private-value",
+            stderr: "npm error\n::error::injected\n##[error]injected\nAuthorization: Bearer private-value",
           };
         },
       }),
@@ -180,6 +275,7 @@ for (const operation of ["version", "dist.tarball", "pack"]) {
         assert.match(error.message, /stage: .*; attempt: .*; stop/u);
         assert.doesNotMatch(error.message, /private-value/u);
         assert.match(error.message, /\[registry\] ::error::injected/u);
+        assert.doesNotMatch(error.message, /##\[/u);
         return true;
       },
     );
@@ -320,12 +416,13 @@ for (const reason of ["timed out", "cancelled", "spawn ENOENT", "output exceeded
         intercept(args) {
           if (args[0] !== "pack") return;
           attempts++;
-          throw new Error(`${reason}: token=private-value`);
+          throw new Error(`${reason}: ##[error]injected token=private-value`);
         },
       }),
       (error: Error) => {
         assert.match(error.message, /stage: download tarball; attempt: 1\/6; stop/u);
         assert.ok(error.message.includes(reason));
+        assert.doesNotMatch(error.message, /##\[/u);
         assert.doesNotMatch(error.message, /private-value/u);
         return true;
       },
@@ -349,11 +446,12 @@ test("cancellation during retry wait stops with package context", async () => {
         return;
       },
       wait: async () => {
-        throw new Error("cancelled token=private-value");
+        throw new Error("cancelled ##[error]injected token=private-value");
       },
     }),
     (error: Error) => {
       assert.match(error.message, /stage: retry wait; attempt: 1\/6; stop/u);
+      assert.doesNotMatch(error.message, /##\[/u);
       assert.doesNotMatch(error.message, /private-value/u);
       return true;
     },
