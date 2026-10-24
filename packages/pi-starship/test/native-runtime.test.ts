@@ -22,6 +22,7 @@ afterEach(() => {
   if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
   else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
@@ -84,6 +85,62 @@ test("missing settings retain the native footer without timers, collectors, or f
   assert.equal(vi.getTimerCount(), 0);
   assert.equal(state.exec.mock.calls.length, 0);
   await state.emit("session_shutdown");
+  await state.emit("session_shutdown");
+});
+
+for (const nativeState of ["missing", "restored"] as const) {
+  for (const format of ["preview only", "$git_branch$github_pr$python"] as const) {
+    test(`${nativeState} settings preview ${format} without collectors until apply`, async () => {
+      vi.useFakeTimers();
+      const state = await setup(nativeState === "restored" ? "format = 'saved footer'\n" : undefined);
+      if (nativeState === "restored") state.options.apply(nativeFooterConfig(state.path), state.context.ctx);
+      const workspace = await import("../src/runtime/workspace.js");
+      const collect = vi.spyOn(workspace, "collectWorkspaceSnapshot").mockResolvedValue({ modules: {} });
+      const execCalls = state.exec.mock.calls.length;
+      const candidate = validateConfigDocument(state.path, `format = '${format}'\n`);
+      state.options.preview?.(candidate, state.context.ctx);
+      const preview = mount(state.context);
+      assert.ok(preview.component.render(80).length > 0);
+      preview.branchChange();
+      await state.emit("agent_end");
+      await state.emit("turn_end");
+      await vi.advanceTimersByTimeAsync(120_000);
+      assert.equal(typeof state.context.footer, "function");
+      assert.equal(preview.unsubscribe.mock.calls.length, 0);
+      assert.equal(state.exec.mock.calls.length, execCalls);
+      assert.equal(collect.mock.calls.length, 0);
+      assert.equal(vi.getTimerCount(), 0);
+      assert.equal(state.options.getLoaded().rawDocument, undefined);
+
+      // Applying the visible candidate must enable collectors without reload.
+      state.options.apply(candidate, state.context.ctx);
+      const applied = mount(state.context);
+      await Promise.resolve();
+      assert.ok(collect.mock.calls.length > 0);
+      assert.ok(vi.getTimerCount() > 0);
+      if (format.includes("git_branch")) assert.ok(state.exec.mock.calls.length > execCalls);
+      else assert.equal(state.exec.mock.calls.length, execCalls);
+      assert.equal(preview.unsubscribe.mock.calls.length, 1);
+      state.options.preview?.(undefined, state.context.ctx);
+      assert.equal(typeof state.context.footer, "function");
+      await state.emit("session_shutdown");
+      assert.equal(applied.unsubscribe.mock.calls.length, 1);
+      assert.equal(vi.getTimerCount(), 0);
+    });
+  }
+}
+
+test("session tree closes a native-mode preview without starting collectors", async () => {
+  vi.useFakeTimers();
+  const state = await setup();
+  state.options.preview?.(custom(), state.context.ctx);
+  const preview = mount(state.context);
+  await state.emit("session_tree");
+  assert.equal(preview.unsubscribe.mock.calls.length, 1);
+  assert.equal(state.context.footer, undefined);
+  await vi.advanceTimersByTimeAsync(120_000);
+  assert.equal(state.exec.mock.calls.length, 0);
+  assert.equal(vi.getTimerCount(), 0);
   await state.emit("session_shutdown");
 });
 

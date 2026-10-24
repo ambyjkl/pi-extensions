@@ -97,6 +97,7 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
   let activeTarget: RefreshTarget | undefined;
   let footerContext: ExtensionContext | undefined;
   let disposeFooter: (() => void) | undefined;
+  let footerCollecting = false;
   let eventDebounceTimer: ReturnType<typeof setTimeout> | undefined;
   let githubPrRefreshTimer: ReturnType<typeof setInterval> | undefined;
   let githubPrExpiryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -171,13 +172,19 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
   const isActiveTarget = (target: RefreshTarget) => activeTarget === target && target.generation === sessionGeneration;
 
   const requestRefresh = (target: RefreshTarget, reason: WorkspaceRefreshInput["reason"] = "event") => {
-    if (!loaded || !isActiveTarget(target)) return;
+    if (!loaded || isNativeFooter(loaded) || !isActiveTarget(target)) return;
     gitController.request({ cwd: target.cwd, config: loaded.config });
     workspaceController.request(workspaceInput(target.cwd, loaded.config, reason, runtime.workspace));
   };
   const scheduleRefresh = (ctx: ExtensionContext) => {
     const target = activeTarget;
-    if (!target || target.cwd !== ctx.cwd || target.sessionManager !== ctx.sessionManager) {
+    if (
+      !loaded ||
+      isNativeFooter(loaded) ||
+      !target ||
+      target.cwd !== ctx.cwd ||
+      target.sessionManager !== ctx.sessionManager
+    ) {
       return;
     }
     clearDebounce();
@@ -188,7 +195,7 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
   };
 
   function restartLocalControllers(target: RefreshTarget) {
-    if (!isActiveTarget(target)) return;
+    if (!loaded || isNativeFooter(loaded) || !isActiveTarget(target)) return;
     gitController.start(target.generation);
     workspaceController.start(target.generation);
   }
@@ -207,7 +214,7 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
   }
 
   function githubPrReachable(): boolean {
-    return Boolean(loaded && reachableModuleRequirements(loaded.config).has("github_pr"));
+    return Boolean(loaded && !isNativeFooter(loaded) && reachableModuleRequirements(loaded.config).has("github_pr"));
   }
 
   function startGithubPr(target: RefreshTarget): boolean {
@@ -256,6 +263,7 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
     footerContext = undefined;
     const dispose = disposeFooter;
     disposeFooter = undefined;
+    footerCollecting = false;
     dispose?.();
     activeTarget = undefined;
     clearDebounce();
@@ -277,7 +285,11 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
       releaseFooter();
       return;
     }
-    if (activeTarget) return;
+    // A preview can replace the visible footer, but only applied settings own collectors.
+    const collect = Boolean(loaded && !isNativeFooter(loaded));
+    if (activeTarget && footerCollecting === collect) return;
+    if (activeTarget) releaseFooter();
+    footerCollecting = collect;
     const target: RefreshTarget = {
       cwd: ctx.cwd,
       generation: sessionGeneration,
@@ -285,9 +297,11 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
     };
     activeTarget = target;
     footerContext = ctx;
-    gitController.start(target.generation);
-    workspaceController.start(target.generation);
-    startGithubPr(target);
+    if (collect) {
+      gitController.start(target.generation);
+      workspaceController.start(target.generation);
+      startGithubPr(target);
+    }
 
     ctx.ui.setFooter((tui, theme, footerData) => {
       runtime.requestRender = () => tui.requestRender();
@@ -302,6 +316,10 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
         inspectStatuslineModules(current.config, runtimeSnapshot(ctx, footerData, runtime), runtime.footerWidth ?? 80);
       const unsubscribe = footerData.onBranchChange(() => {
         if (!isActiveTarget(target)) return;
+        if (!collect) {
+          tui.requestRender();
+          return;
+        }
         runtime.git = undefined;
         restartLocalControllers(target);
         clearDebounce();
@@ -318,40 +336,42 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
             width: number;
           }
         | undefined;
-      const timer = setInterval(() => {
-        if (!isActiveTarget(target)) return;
-        clearDebounce();
-        requestRefresh(target, "periodic");
-        // Collectors publish only changed snapshots. The clock is the sole value
-        // that changes without publication; reuse the last render's session data.
-        if (!lastRender) return;
-        const clock = reachableModuleRequirements(lastRender.config).get("time");
-        const range = lastRender.config.modules.time.options.time_range;
-        if (!clock || (!clock.has("time") && (!range || range === "-"))) return;
-        const now = new Date();
-        const previous = lastRender.snapshot.now;
-        if (
-          !lastRender.config.modules.time.options.time_format &&
-          lastRender.config.modules.time.options.utc_time_offset === "local" &&
-          (!range || range === "-") &&
-          now.getHours() === previous.getHours() &&
-          now.getMinutes() === previous.getMinutes()
-        )
-          return;
-        const lines = wrapFormattedStatusline(
-          renderStatusline(
-            lastRender.config,
-            { ...lastRender.snapshot, now },
-            lastRender.width,
-            getCapabilities().trueColor,
-            theme.colors,
-          ).ansi,
-          lastRender.width,
-        );
-        const previousLines = lastRender.lines;
-        if (lines.length !== previousLines.length || lines.some((line, index) => line !== previousLines[index]))
-          tui.requestRender();
-      }, REFRESH_INTERVAL_MS);
+      const timer = collect
+        ? setInterval(() => {
+            if (!isActiveTarget(target)) return;
+            clearDebounce();
+            requestRefresh(target, "periodic");
+            // Collectors publish only changed snapshots. The clock is the sole value
+            // that changes without publication; reuse the last render's session data.
+            if (!lastRender) return;
+            const clock = reachableModuleRequirements(lastRender.config).get("time");
+            const range = lastRender.config.modules.time.options.time_range;
+            if (!clock || (!clock.has("time") && (!range || range === "-"))) return;
+            const now = new Date();
+            const previous = lastRender.snapshot.now;
+            if (
+              !lastRender.config.modules.time.options.time_format &&
+              lastRender.config.modules.time.options.utc_time_offset === "local" &&
+              (!range || range === "-") &&
+              now.getHours() === previous.getHours() &&
+              now.getMinutes() === previous.getMinutes()
+            )
+              return;
+            const lines = wrapFormattedStatusline(
+              renderStatusline(
+                lastRender.config,
+                { ...lastRender.snapshot, now },
+                lastRender.width,
+                getCapabilities().trueColor,
+                theme.colors,
+              ).ansi,
+              lastRender.width,
+            );
+            const previousLines = lastRender.lines;
+            if (lines.length !== previousLines.length || lines.some((line, index) => line !== previousLines[index]))
+              tui.requestRender();
+          }, REFRESH_INTERVAL_MS)
+        : undefined;
       let disposed = false;
 
       const dispose = () => {
@@ -361,6 +381,7 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
         clearInterval(timer);
         if (isActiveTarget(target)) {
           activeTarget = undefined;
+          footerCollecting = false;
           clearDebounce();
           gitController.stop();
           workspaceController.stop();
