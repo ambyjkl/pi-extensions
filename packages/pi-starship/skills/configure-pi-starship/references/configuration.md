@@ -41,19 +41,18 @@ The ordinary main-session skill has no live runtime access; direct active-state 
 The preview uses cached data without starting module commands or network requests.
 During a response, normal submission queues steering for the next assistant turn; the configured app.message.followUp action queues work after natural completion and submits normally when idle.
 The app.message.dequeue action restores pending messages to the editor; these message actions use Pi's native precedence, including explicit history bindings.
-The configured cancel action stops a response and restores undelivered messages, or opens review when idle; editor actions win review-key collisions, with Escape as a review fallback unless assigned to an editor action.
+The configured cancel action stops a response and restores undelivered messages; when idle, it leaves the conversation open without opening a menu. Editor actions win cancel-key collisions, with Escape as a stop fallback unless assigned to an editor action.
 Failed or aborted responses restore undelivered input without automatic restart.
 Ctrl+C discards the flow, clears both queues, and restores the active footer unless its session was replaced.
 When idle with a valid draft, Ctrl+S opens the Save draft as profile flow directly; its gray editor-border hint switches to F2 if Ctrl+S is reserved, or is omitted when both keys conflict.
-The review menu retains the same save action.
 Saving requires exact-draft review and a profile name; invalid or existing names are rejected without overwriting a profile.
 After saving, the host asks whether to apply that profile through managed History and atomic replacement; declining keeps the profile without changing active settings.
 Cancelling naming returns to the chat without saving; closing or session replacement removes the temporary draft, not any saved profile.
 Application checks the initial disk snapshot, loaded revision, and saved profile identity, blocks detected concurrent changes, and warns before explicitly repairing an invalid original.
 Chat content and settings read by the agent go to the selected model provider; the child uses the opening model/thinking selection with Pi authentication, has no shell tool, and does not persist its transcript or change the main conversation.
 The fullscreen view uses Pi's native user/assistant/tool message components. Short gray status and control labels sit on the editor borders; the live preview ends at the terminal bottom, in the saved footer's position.
-It shows recent output with expanded, read-only tool results; review actions expose the complete transcript and exact draft.
-Choose **Continue** to leave a document/transcript review; cancelling the review discards the flow without publishing.
+It shows recent output with expanded, read-only tool results; saving opens an exact-draft review.
+Choose **Continue** to leave the save review; cancelling the review discards the flow without publishing.
 
 Outside this hosted chat, the bundled `configure-pi-starship` skill uses a separate external-edit workflow.
 Before its apply script replaces an existing document, it preserves the inspected document under `<getAgentDir()>/pi-starship/pi-starship-YYYYMMDDHHmm.toml`; these backups use local time and remain after a successful apply.

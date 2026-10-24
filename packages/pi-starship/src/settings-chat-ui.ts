@@ -24,7 +24,7 @@ import type { WorkflowOwner } from "./command-configuration.js";
 import { createSettingsChatTranscript } from "./settings-chat-transcript.js";
 import type { SettingsDraft } from "./settings-draft.js";
 
-export type SettingsChatAction = "review" | "save" | "discard";
+export type SettingsChatAction = "save" | "discard";
 
 const SAVE_SHORTCUTS = [
   { key: "ctrl+s", inputs: ["\x13", "\x1b[115;5u", "\x1b[27;5;115~"] },
@@ -57,24 +57,6 @@ export function settingsChatSaveShortcut(
 export interface ChatViewState {
   input: string;
   error: string;
-}
-
-/** Frame the review menu's footer preview without changing its render width. */
-export function renderSettingsChatPreview(
-  width: number,
-  preview: readonly string[],
-  theme: Pick<Theme, "fg">,
-): string[] {
-  if (width <= 0) return [];
-  const ruleStyle = (text: string) => theme.fg("border", text);
-  const top = new HorizontalRule({
-    label: "Preview",
-    labelAlignment: "left",
-    ruleStyle,
-    labelStyle: (text) => theme.fg("dim", text),
-  });
-  const bottom = new HorizontalRule({ ruleStyle });
-  return [top.render(width)[0] ?? "", ...preview, bottom.render(width)[0] ?? ""];
 }
 
 /** Add labels only to the public Editor border hooks; native scroll indicators keep priority. */
@@ -126,8 +108,8 @@ export class SettingsChatEditor extends CustomEditor {
   }
 }
 
-/** Editor actions win collisions. Escape remains a review fallback for unusable cancel settings. */
-export function settingsChatReviewInput(data: string, keybindings: Pick<KeybindingsManager, "matches">): boolean {
+/** Editor actions win collisions. Escape remains a stop fallback for unusable cancel settings. */
+export function settingsChatStopInput(data: string, keybindings: Pick<KeybindingsManager, "matches">): boolean {
   const editorKeys = getKeybindings();
   const parsed = parseKey(data);
   const textKey = parsed?.startsWith("shift+") ? parsed.slice(6) : parsed;
@@ -148,26 +130,6 @@ export function settingsChatReviewInput(data: string, keybindings: Pick<Keybindi
       .filter((key) => key.startsWith("tui.editor.") || key.startsWith("tui.input."))
       .some((key) => editorKeys.matches(data, key));
   return !editing && (keybindings.matches(data, "tui.select.cancel") || matchesKey(data, Key.escape));
-}
-
-export function settingsChatTranscript(agent: Agent): string[] {
-  return [...agent.state.messages, ...(agent.state.streamingMessage ? [agent.state.streamingMessage] : [])]
-    .filter((message) => message.role !== "system")
-    .flatMap((message) => {
-      if (!("content" in message) || !Array.isArray(message.content)) return [];
-      const label = message.role === "user" ? "You" : message.role === "assistant" ? "Agent" : "Tool";
-      const text = message.content
-        .map((part) => {
-          if (part.type === "text") return part.text;
-          if (part.type === "toolCall") return `Using ${part.name}…`;
-          return "";
-        })
-        .filter(Boolean)
-        .join("\n");
-      const error = message.role === "assistant" ? message.errorMessage : undefined;
-      const output = [text, error].filter(Boolean).join("\n");
-      return output ? [`${label}: ${sanitizeTerminalDocument(output)}`] : [];
-    });
 }
 
 export function createSettingsChatComponent(options: {
@@ -202,7 +164,7 @@ export function createSettingsChatComponent(options: {
       const saveKey = !pending && !inPaste && draft.candidate ? settingsChatSaveShortcut(keybindings) : undefined;
       return {
         top: queued.length > 0 ? `pi-starship · ${queued.length} queued` : "pi-starship",
-        bottom: `${status} · unsaved · ${pending ? "Working · Cancel stop" : saveKey ? `${saveKey} save profile` : "Cancel review"} · Ctrl+C discard`,
+        bottom: `${status} · unsaved · ${pending ? "Working · Cancel stop" : saveKey ? `${saveKey} save profile` : "Idle"} · Ctrl+C discard`,
       };
     },
     keybindings,
@@ -356,14 +318,11 @@ export function createSettingsChatComponent(options: {
       } else if (saveKey && matchesKey(data, saveKey) && !saveKeyReserved(data, keybindings)) {
         state.input = editor.getExpandedText();
         options.complete("save");
-      } else if (settingsChatReviewInput(data, keybindings)) {
+      } else if (settingsChatStopInput(data, keybindings)) {
         if (pending) {
           stopping = true;
           restoreQueue();
           agent.abort();
-        } else {
-          state.input = editor.getExpandedText();
-          options.complete("review");
         }
       } else editor.handleInput(data);
       render();
