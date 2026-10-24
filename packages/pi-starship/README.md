@@ -10,7 +10,7 @@ The extension parses and renders the footer itself, so it does not need the `sta
 
 ## ✨ Features
 
-- Starts with a readable built-in footer and offers Starship presets plus a Pi-native Minimal preset.
+- Keeps Pi's native footer until settings are saved and offers Starship presets plus a Pi-native Minimal preset.
 - Supports root and module formats, conditional groups, `$all`, styles, palettes, and width-aware `$fill` alignment.
 - Selects provider, model, and thinking styles from exact runtime values with ordered module rules.
 - Provides Pi, model, usage, Git, pull request, package, language, environment, deployment, cloud, and execution modules, with usage totals including persisted cache warming.
@@ -48,7 +48,7 @@ Do not enable this with `@narumitw/pi-statusline`: both own Pi's footer, and Pi 
 
 ## 🚀 Quick start
 
-Start Pi with the extension to use the built-in footer without creating a settings file.
+Start Pi with the extension to keep Pi's native footer without creating a settings file.
 Run `/starship` and choose **Configure with agent** for edits and explanations, or choose a preset.
 
 The bundled configuration skill is manual-only and is not available for automatic model invocation.
@@ -76,7 +76,7 @@ It does not cover general TOML, shell Starship configuration, extension source d
 All routes support TUI and RPC with the exceptions above and reject unknown or trailing arguments.
 Print and JSON modes produce no command output; the footer runs only in TUI mode.
 Profiles, history, preset selection, configuration chat, and Gist sharing and import are menu-only, not extra subcommands.
-Restoring built-in configuration requires an existing settings document to replace; see [Settings](#-settings).
+**Restore built-in…** archives the exact settings bytes in History, removes the active settings document, and returns to Pi's native footer. It requires an existing document, including a saved built-in Starship example.
 Configuration shows source, path, health, and warnings above its reload, Gist, and History operations. Configured selection page-up/page-down actions scroll long summaries without changing the selected operation.
 
 ## ⚙️ Settings
@@ -109,7 +109,7 @@ See [Configuration and format](./skills/configure-pi-starship/references/configu
 Use `/starship` for interactive configuration, preview, diagnostics, presets, and recovery.
 Manual file edits load at the next `session_start`, including `/reload`.
 
-Existing defaults and the built-in footer remain unchanged.
+The built-in Starship example remains an editing seed; saving it enables a Starship footer, not Pi's native footer.
 Module references cover bounded regex substitutions/context rules, component version formats, Git templates/controls, clock zones/ranges, Python argv alternatives, environment detectors, requirement styling, and private-package visibility.
 The six Jujutsu/system modules require explicit `disabled = false` plus a root reference or `$all`; see [module behavior](./skills/configure-pi-starship/references/modules.md#jujutsu-modules).
 

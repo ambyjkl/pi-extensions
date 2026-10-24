@@ -23,7 +23,7 @@ test("Configuration keeps exactly four operations and exposes state without read
     screen.items.map((item) => item.label),
     ["Reload from disk…", "Share settings as Gist…", "Import settings from Gist…", "History"],
   );
-  assert.match(screen.lines.join("\\n"), /State: Built-in defaults.*Source: No settings file.*Health: Healthy/su);
+  assert.match(screen.lines.join("\\n"), /State: Pi native footer.*Source: No settings file.*Health: Healthy/su);
   assert.ok(screen.lines.includes(`Path: ${path}`));
   assert.equal(existsSync(join(root, "missing")), false);
   const mock = createMockPi();
@@ -137,7 +137,7 @@ test("Reload applies a validated external edit without changing disk bytes", asy
   }
 });
 
-test("Reload previews file removal and applies built-in defaults without creating a file", async () => {
+test("Reload previews file removal and applies Pi native footer without creating a file", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-starship-reload-missing-"));
   const path = join(root, "pi-starship.toml");
   writeFileSync(path, "format = '$provider'\n");
@@ -164,7 +164,7 @@ test("Reload previews file removal and applies built-in defaults without creatin
       currentOwner,
     );
     await tui.waitForOpen();
-    assert.match(tui.render().join("\n"), /Built-in defaults/u);
+    assert.match(tui.render().join("\n"), /Pi native footer/u);
     tui.press("tui.select.confirm");
     assert.equal(await running, "applied");
     assert.equal(loaded.source, "built-in");
@@ -203,9 +203,10 @@ test("Reload clears a recovered read-error fallback when the document is now mis
       currentOwner,
     );
     await tui.waitForOpen();
-    assert.match(tui.render().join("\n"), /Built-in defaults/u);
+    assert.match(tui.render().join("\n"), /Pi native footer/u);
     tui.press("tui.select.confirm");
     assert.equal(await running, "applied");
+    assert.equal(loaded.rawDocument, undefined);
     assert.deepEqual(loaded.diagnostics, []);
     assert.equal(existsSync(path), false);
   } finally {

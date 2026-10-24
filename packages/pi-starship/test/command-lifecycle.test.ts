@@ -178,6 +178,8 @@ test("session shutdown disposes an open settings preview before returning", asyn
 
 test("preset cursor preview swaps only the in-memory footer and Back restores it", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-starship-live-preset-footer-"));
+  const activeDocument = "format = 'π active'\n";
+  writeFileSync(join(root, "pi-starship.toml"), activeDocument);
   const previous = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = root;
   try {
@@ -204,7 +206,7 @@ test("preset cursor preview swaps only the in-memory footer and Back restores it
     tui.press("tui.select.confirm");
     await tui.waitForOpen();
     assert.doesNotMatch(footer.render(80).join("\n"), /π/u);
-    assert.equal(existsSync(join(root, "pi-starship.toml")), false);
+    assert.equal(readFileSync(join(root, "pi-starship.toml"), "utf8"), activeDocument);
 
     tui.press("tui.select.cancel");
     await tui.waitForOpen();
@@ -222,6 +224,8 @@ test("preset cursor preview swaps only the in-memory footer and Back restores it
 
 test("session replacement clears an open preset footer preview before returning", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-starship-replace-preset-preview-"));
+  const activeDocument = "format = 'π active'\n";
+  writeFileSync(join(root, "pi-starship.toml"), activeDocument);
   const previous = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = root;
   try {
@@ -251,7 +255,7 @@ test("session replacement clears an open preset footer preview before returning"
     await emit(mock.events, "session_start", {}, newContext.ctx);
     await command;
     assert.match(oldFooter.render(80).join("\n"), /π/u);
-    assert.equal(existsSync(join(root, "pi-starship.toml")), false);
+    assert.equal(readFileSync(join(root, "pi-starship.toml"), "utf8"), activeDocument);
     oldFooter.dispose();
     await emit(mock.events, "session_shutdown", {}, newContext.ctx);
   } finally {

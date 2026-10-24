@@ -81,7 +81,9 @@ Do not install another Pi copy, modify `node_modules`, hard-code a Bun global di
 
 Read the existing document before editing it.
 
-Treat a missing document as built-in defaults, and create it only when the requested change requires a persisted configuration.
+Treat a missing document as Pi's native footer, and create it only when the requested change requires a persisted Starship configuration.
+Use the built-in Starship example as an editing seed, not as a document equivalent to Pi's native footer.
+The menu action **Restore built-in…** archives the exact active bytes in History and removes the settings document; a saved built-in Starship example remains eligible for Restore.
 
 Do not redirect this workflow to `starship.toml`, `pi-statusline.json`, project-local overrides, or extension source files.
 

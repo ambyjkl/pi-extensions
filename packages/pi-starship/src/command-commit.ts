@@ -58,9 +58,13 @@ export async function commitActiveDocument(
   expected: CommitExpectation,
   allowInvalid = false,
   checkCandidate?: () => void,
+  restoreNative = false,
 ): Promise<"applied" | "cancel"> {
   const raw = candidate.rawDocument;
-  if (raw === undefined) throw new Error("The candidate settings document is unavailable");
+  if (restoreNative) {
+    if (raw !== undefined || candidate.source !== "built-in" || candidate.diagnostics.length > 0)
+      throw new Error("The native footer candidate is invalid");
+  } else if (raw === undefined) throw new Error("The candidate settings document is unavailable");
   return withFileMutationQueue(options.settingsPath, async () => {
     if (!commitOwnerCurrent(options, owner, expected)) return "cancel";
     checkCandidate?.();
@@ -75,8 +79,10 @@ export async function commitActiveDocument(
     if (invalid && !allowInvalid)
       throw new Error("The active settings document is invalid. Use explicit repair or recovery before replacing it.");
     // Always validate again at the publication boundary, not only in the preview layer.
-    validateConfigDocument(options.settingsPath, raw);
-    if (previousBytes?.equals(Buffer.from(raw))) return "applied";
+    if (raw !== undefined) {
+      validateConfigDocument(options.settingsPath, raw);
+      if (previousBytes?.equals(Buffer.from(raw))) return "applied";
+    }
 
     let recoveryPath: string | undefined;
     if (previousBytes !== undefined) {
@@ -92,10 +98,28 @@ export async function commitActiveDocument(
     }
     let saved: LoadedStarshipConfig;
     try {
-      saved = options.save
-        ? options.save(options.settingsPath, raw)
-        : atomicSaveConfigDocument(options.settingsPath, raw, {}, expected.disk);
+      if (raw === undefined) {
+        if (previousBytes !== undefined) {
+          if (!expected.disk.fileIdentity) throw new Error("The settings document identity is unavailable");
+          removeConfigDocumentIfMatches(
+            options.settingsPath,
+            previousBytes.toString("utf8"),
+            expected.disk.fileIdentity,
+          );
+        }
+        saved = candidate;
+      } else {
+        saved = options.save
+          ? options.save(options.settingsPath, raw)
+          : atomicSaveConfigDocument(options.settingsPath, raw, {}, expected.disk);
+      }
     } catch (error) {
+      if (restoreNative) {
+        const rollback = restorePrevious(ctx, options, owner, expected, undefined, undefined, false);
+        throw new Error(
+          `Pi native footer was not restored: ${message(error)}. ${rollback}${recoveryNote(recoveryPath)}`,
+        );
+      }
       if (error instanceof ConfigPublicationError) {
         const rollback = restorePrevious(ctx, options, owner, expected, raw, error.fileIdentity, false);
         throw new Error(`Footer settings were not saved: ${message(error)}. ${rollback}${recoveryNote(recoveryPath)}`);
@@ -128,7 +152,7 @@ function restorePrevious(
   options: CommitOptions,
   owner: WorkflowOwner,
   expected: CommitExpectation,
-  raw: string,
+  raw: string | undefined,
   identity: LoadedStarshipConfig["fileIdentity"],
   restoreRuntime: boolean,
 ): string {
@@ -138,6 +162,16 @@ function restorePrevious(
     const current = options.getLoaded();
     if (current.rawDocument !== expected.previous.rawDocument && current.rawDocument !== raw) {
       throw new Error("The active runtime changed; stale restoration was blocked");
+    }
+    if (raw === undefined) {
+      const disk = readConfigDocumentSnapshot(options.settingsPath);
+      if (disk.rawBytes !== undefined) {
+        assertConfigDocumentUnchanged(options.settingsPath, expected.disk);
+      } else if (expected.disk.rawBytes !== undefined) {
+        atomicRestoreConfigDocument(options.settingsPath, expected.disk.rawBytes, {}, disk);
+      }
+      if (restoreRuntime) options.apply(expected.previous, ctx);
+      return "The previous configuration was restored.";
     }
     if (!identity) throw new Error("The saved settings document identity is unavailable");
     assertConfigDocumentUnchanged(options.settingsPath, { rawBytes: Buffer.from(raw), fileIdentity: identity });

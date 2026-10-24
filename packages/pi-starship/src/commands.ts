@@ -19,7 +19,7 @@ import { importSettingsGist, shareSettingsGist } from "./command-gist.js";
 import { showPresetPicker } from "./command-preset-picker.js";
 import { type PreviewMenuResult, showPreviewActionMenu } from "./command-preview.js";
 import { saveAsProfile, showHistory, showProfiles } from "./command-profiles.js";
-import { BUILT_IN_EXAMPLE, type LoadedStarshipConfig, validateConfigDocument } from "./config.js";
+import { BUILT_IN_EXAMPLE, type LoadedStarshipConfig, nativeFooterConfig, validateConfigDocument } from "./config.js";
 import type { GhApi } from "./gist.js";
 import type { StatuslineInspection } from "./modules/inspection.js";
 import { getStarshipPreset, presetForDocument, STARSHIP_PRESETS, type StarshipPreset } from "./presets/catalog.js";
@@ -502,8 +502,8 @@ async function restoreBuiltIn(
 ): Promise<"applied" | "cancel" | "close"> {
   const owner = workflowOwner(options);
   if (!isCurrentOwner(owner)) return "cancel";
-  const validated = (options.validate ?? validateConfigDocument)(options.settingsPath, BUILT_IN_EXAMPLE);
-  const result = await reviewAndApply(ctx, options, validated, { kind: "restore" }, owner);
+  const candidate = nativeFooterConfig(options.settingsPath);
+  const result = await reviewAndApply(ctx, options, candidate, { kind: "restore" }, owner);
   return result === "edit" ? "cancel" : result;
 }
 
@@ -588,6 +588,7 @@ export async function reviewAndApply(
         expected,
         intent.kind === "restore" || intent.kind === "history" || intent.kind === "customize",
         checkCandidate,
+        intent.kind === "restore",
       );
       if (!isSessionOwnerCurrent(owner) || result === "cancel") return "cancel";
     } catch (error) {
@@ -628,7 +629,7 @@ function continueLabel(intent: ReviewIntent): string {
     case "customize":
       return "Apply changes…";
     case "restore":
-      return "Replace with built-in…";
+      return "Restore Pi native footer…";
     case "import":
       return "Replace with Gist settings…";
     case "profile":
@@ -645,7 +646,7 @@ function confirmationTitle(intent: ReviewIntent): string {
     case "customize":
       return "Apply footer changes?";
     case "restore":
-      return "Restore built-in footer?";
+      return "Restore Pi native footer?";
     case "import":
       return "Replace settings with Gist?";
     case "profile":
@@ -658,21 +659,21 @@ function confirmationTitle(intent: ReviewIntent): string {
 }
 
 function confirmationMessage(settingsPath: string, intent: ReviewIntent, previous: LoadedStarshipConfig): string {
+  if (intent.kind === "restore")
+    return `Remove ${safeText(settingsPath)} and show Pi's native footer? The exact previous document, including invalid settings, unknown fields, and comments, will be kept in History.`;
   if (previous.diagnostics.some((item) => item.severity === "error")) {
     return `Explicit recovery: replace the invalid settings file ${safeText(settingsPath)} entirely with the reviewed document? Its exact original bytes will be kept in History before replacement.`;
   }
   if (intent.kind === "customize")
     return "Replace the entire settings document and apply it immediately? Its previous bytes will be kept in History.";
   const replacement =
-    intent.kind === "restore"
-      ? "the built-in configuration"
-      : intent.kind === "import"
-        ? "the reviewed Gist settings"
-        : intent.kind === "profile"
-          ? `the ${safeText(intent.name)} profile`
-          : intent.kind === "history"
-            ? "the reviewed history document"
-            : `the ${intent.preset.label} preset`;
+    intent.kind === "import"
+      ? "the reviewed Gist settings"
+      : intent.kind === "profile"
+        ? `the ${safeText(intent.name)} profile`
+        : intent.kind === "history"
+          ? "the reviewed history document"
+          : `the ${intent.preset.label} preset`;
   return `Replace ${safeText(settingsPath)} entirely with ${replacement}? All custom settings, unknown fields, and comments will be replaced. The previous document will be kept in History.`;
 }
 
@@ -681,7 +682,7 @@ function successMessage(intent: ReviewIntent): string {
     case "customize":
       return "Footer settings saved and applied";
     case "restore":
-      return "Built-in footer restored and applied";
+      return "Pi native footer restored and applied";
     case "import":
       return "Gist settings saved and applied";
     case "profile":
@@ -730,7 +731,7 @@ function reviewPreviewBody(
   width: number,
   intent: ReviewIntent,
 ): string[] {
-  if (intent.kind === "restore") return restorePreviewBody(ctx, options, loaded, width);
+  if (intent.kind === "restore") return restorePreviewBody(options);
   if (intent.kind !== "preset") return previewBody(ctx, options, loaded, width);
   const current = configurationPresentation(options.getLoaded());
   return [
@@ -745,20 +746,15 @@ function reviewPreviewBody(
   ];
 }
 
-function restorePreviewBody(
-  ctx: ExtensionCommandContext,
-  options: StarshipCommandOptions,
-  loaded: LoadedStarshipConfig,
-  width: number,
-): string[] {
+function restorePreviewBody(options: StarshipCommandOptions): string[] {
   const current = configurationPresentation(options.getLoaded());
   return [
     `Current: ${current.state}`,
     `Path: ${safeText(options.settingsPath)}`,
-    "The entire settings document will be replaced, including custom settings, unknown fields, and comments.",
-    "The previous document will be kept in History before replacement.",
-    "",
-    ...previewBody(ctx, options, loaded, width),
+    "The entire settings document will be removed, including custom settings, unknown fields, and comments.",
+    "The previous document will be kept in History before removal.",
+    "Pi's native footer will be shown instead of the pi-starship footer.",
+    "No replacement settings file will be created.",
   ];
 }
 
