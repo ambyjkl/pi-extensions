@@ -16,6 +16,7 @@ import {
   parseKey,
   type TUI,
   TUI_KEYBINDINGS,
+  type TuiMouseEvent,
   truncateToWidth,
 } from "@earendil-works/pi-tui";
 import { HorizontalRule, renderBoundedFrame, runCustomInteraction } from "@narumitw/pi-tui-kit";
@@ -186,6 +187,15 @@ export function createSettingsChatComponent(options: {
   let inPaste = false;
   let pending: Promise<void> | undefined;
   let stopping = false;
+  // Undefined follows new output; a fixed top row preserves history during streaming.
+  let historyTop: number | undefined;
+  let historyRows = 0;
+  let historyMaximum = 0;
+  const scrollHistory = (delta: number) => {
+    const next = Math.max(0, Math.min(historyMaximum, (historyTop ?? historyMaximum) + delta));
+    historyTop = next === historyMaximum ? undefined : next;
+    render();
+  };
   const queued: Array<{ kind: "steer" | "followUp"; message: UserMessage; text: string }> = [];
   const editor = new SettingsChatEditor(
     tui,
@@ -292,6 +302,7 @@ export function createSettingsChatComponent(options: {
       editor.focused = value;
     },
     render(width: number): string[] {
+      historyRows = 0;
       if (disposed || signal.aborted || width <= 0) return [];
       const rows = Math.max(0, Math.floor(Number.isFinite(tui.terminal.rows) ? tui.terminal.rows : 24));
       if (rows === 0) return [];
@@ -334,7 +345,15 @@ export function createSettingsChatComponent(options: {
         );
       const content = [...queueLines, ...input, ...detailLines, ...preview];
       const available = rows - content.length;
-      const history = available > 0 ? transcript.render(width).slice(-available) : [];
+      historyRows = available;
+      const lines = available > 0 ? transcript.render(width) : [];
+      historyMaximum = Math.max(0, lines.length - available);
+      if (historyTop !== undefined) {
+        historyTop = Math.min(historyTop, historyMaximum);
+        if (historyTop === historyMaximum) historyTop = undefined;
+      }
+      const top = historyTop ?? historyMaximum;
+      const history = lines.slice(top, top + available);
       return [...history, ...Array.from({ length: available - history.length }, () => ""), ...content].map((line) =>
         truncateToWidth(line, width, ""),
       );
@@ -365,8 +384,20 @@ export function createSettingsChatComponent(options: {
           state.input = editor.getExpandedText();
           options.complete("review");
         }
+        // In this fullscreen chat, configured Editor page actions navigate the transcript.
+        // Arrow keys, history recall, and all other native Editor actions remain unchanged.
+      } else if (getKeybindings().matches(data, "tui.editor.pageUp")) {
+        scrollHistory(-Math.max(1, historyRows));
+      } else if (getKeybindings().matches(data, "tui.editor.pageDown")) {
+        scrollHistory(Math.max(1, historyRows));
       } else editor.handleInput(data);
       render();
+    },
+    handleMouse(event: TuiMouseEvent) {
+      if (disposed || signal.aborted || inPaste || historyRows === 0 || event.type !== "wheel" || !event.wheelDelta)
+        return undefined;
+      scrollHistory(event.wheelDelta < 0 ? -3 : 3);
+      return { handled: true, render: true };
     },
     dispose() {
       if (disposed) return;

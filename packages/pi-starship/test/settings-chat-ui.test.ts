@@ -96,6 +96,51 @@ function fixture(
   };
 }
 
+for (const remapped of [false, true]) {
+  test(`chat history supports paging and wheel scrolling with ${remapped ? "custom" : "default"} keys`, async () => {
+    const keys = new KeybindingsManager(
+      CHAT_KEYS,
+      remapped
+        ? {
+            "tui.editor.pageUp": "ctrl+u",
+            "tui.editor.pageDown": "ctrl+d",
+          }
+        : {},
+    );
+    const f = fixture(undefined, keys);
+    try {
+      await f.tui.waitForOpen();
+      f.agent.state.messages.push({
+        role: "user",
+        content: Array.from({ length: 120 }, (_, i) => `history-${i.toString().padStart(3, "0")}`).join("\n"),
+        timestamp: 0,
+      });
+      const bottom = f.tui.render().join("\n");
+      assert.match(bottom, /history-119/u);
+      f.tui.type("keep this draft");
+      f.tui.send(remapped ? "\x15" : "\x1b[5~");
+      const older = f.tui.render().join("\n");
+      assert.doesNotMatch(older, /history-119/u);
+      assert.match(older, /keep this draft/u);
+      f.agent.state.messages.push({ role: "user", content: "new-tail", timestamp: 1 });
+      assert.equal(f.tui.render().join("\n"), older);
+      f.tui.mouse({ type: "wheel", x: 1, y: 1, wheelDelta: -1 });
+      assert.notEqual(f.tui.render().join("\n"), older);
+      for (let i = 0; i < 10; i++) f.tui.send(remapped ? "\x04" : "\x1b[6~");
+      assert.match(f.tui.render().join("\n"), /new-tail/u);
+      for (const width of [1, 20, 80]) {
+        const frame = f.tui.render(width);
+        assert.ok(frame.every((line) => visibleWidth(line) <= width));
+      }
+      f.tui.send("\x03");
+      assert.equal(await f.running, "discard");
+      assert.equal(f.state.input, "keep this draft");
+    } finally {
+      await f.dispose();
+    }
+  });
+}
+
 test("editor border labels preserve native hidden-line indicators", () => {
   class NativeEditor extends Editor {
     borders(width: number, hidden: number) {
