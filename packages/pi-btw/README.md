@@ -13,6 +13,7 @@ Only context you explicitly bring back is loaded into the main editor.
 - Uses Pi's message components, a native-style working editor border, and a compact footer below the editor.
 - Offers fullscreen, side-thread-left, and side-thread-right workspaces with Pi's live main-thread view, mouse or keyboard pane focus, and a draggable remembered divider.
 - Renders supported Mermaid fences as width-safe, themed Unicode diagrams without a browser or network request.
+- Manually previews and imports new main-thread context without stopping main work or rewriting earlier side exchanges.
 - Keeps side questions and answers out of the main conversation by default.
 - Brings back the latest answer, a question suffix, an exact range, or the complete thread only when requested.
 - Uses Pi's current model and thinking level or saved pi-btw choices.
@@ -56,7 +57,9 @@ Both routes require TUI mode and a model with usable credentials; see [Settings]
 Side questions and selected conversation context are sent to that model's provider.
 Bringing context back fills the main editor without submitting; replacing an existing draft requires confirmation.
 Ctrl+C cancels the response and discards the current draft and queued questions, but completed exchanges remain resumable in memory.
-Read the [workflow guide](./docs/workflows.md) for context selection, copying, search, steering, and draft recovery; `/new`, `/resume`, `/fork`, `/reload`, and restart discard retained threads.
+While composing, use **Import main updates** (`F9` by default) to preview and confirm new main context; no content is imported automatically.
+Imports can increase context size and provider cost; see [import scope and branch limits](./docs/workflows.md#import-main-updates).
+Read the [workflow guide](./docs/workflows.md) for context selection, importing, copying, search, steering, and draft recovery; `/new`, `/resume`, `/fork`, `/reload`, and restart discard retained threads.
 
 ## ⚙️ Settings
 
@@ -142,6 +145,7 @@ The literal `/btw settings` remains a side question, not a settings subcommand.
 | `cycleThinkingLevel` | Inherit Pi's `app.thinking.cycle` | Cycle supported levels while composing or generating. |
 | `bringToMain` | `ctrl+r` | Open the bring-to-main chooser after a completed answer. |
 | `switchPane` | First available `f6`, `f7`, or `f8` | Switch keyboard focus between panes in a split workspace. |
+| `importMainUpdates` | First available `f9`, `f10`, or `f11` | Preview and confirm main updates while the side composer is idle. |
 
 For example, merge these overrides into `pi-btw.json`:
 

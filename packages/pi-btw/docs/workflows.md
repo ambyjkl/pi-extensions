@@ -10,14 +10,51 @@ The tree snapshots persisted entries and preserves the main editor draft without
 For either context source, only user and assistant messages contribute text and formatted tool-call or tool-result blocks.
 Images, standalone tool-result messages, compaction summaries, branch summaries, and other session entries are excluded.
 The side thread retains the last 40,000 characters of this text and adds a truncation notice when earlier content is omitted.
-Side-thread context stays immutable if the main conversation later changes.
+The initial snapshot stays immutable. Later main progress reaches the side model only after an explicit import; see [Import main updates](#import-main-updates).
 An explicit `Shift+L` label edit is the selector's only main-session mutation and persists through Pi.
 Native tree copying reports success or failure; Escape returns to the manager and Ctrl+C closes the flow.
 
-**Resume side thread** searches non-empty in-memory threads by their first question and question count.
+**Resume side thread** searches retained in-memory threads by their first question and question count; threads containing only confirmed imports use **Main context updates** as their title.
 The first question remains the title; threads are ordered by their newest answer or visible error.
 Opening and closing without a new result does not reorder them.
 `/btw <question>` bypasses selection and always starts a new thread.
+
+## Import main updates
+
+While the side composer is idle, use **Import main updates** (`F9` by default, then the first usable `F10` or `F11`) to review new persisted main-thread context.
+The shortcut is configurable in `/btw` → **Settings**.
+A `(new)` hint indicates eligible updates when the footer has room; main progress never imports content automatically.
+If no shortcut is available, change the BTW shortcut or the conflicting Pi binding.
+Import is unavailable while answering or draining queued side questions.
+
+The read-only preview shows the source session, entry range, retained character count, and any omission notices.
+Confirm to append exactly that snapshot, or press Escape to return without changes.
+Ctrl+C closes the side flow without applying the pending import.
+The main agent keeps running; entries added after the preview opens remain available for the next explicit import.
+The side draft is restored when returning to the composer.
+
+Imports contain new user text, finalized assistant text, and textual tool calls and standalone tool results in source order.
+Finalized error, aborted, and length-limited assistant responses retain their status labels; they are not evidence of successful work.
+Tool calls on error or aborted responses are not executed by Pi; length-limited calls receive synthetic error results instead of execution.
+A tool-call batch waits until all its results exist, including parallel results; live stream deltas and partial tool updates are excluded.
+Thinking, images, system instructions, and unrelated state entries are excluded.
+Persisted pending responses or deferred provider handles block the cursor from advancing past them; start a new side thread from a later completed source if needed.
+Each text or tool-call block is limited to 8,000 characters, and each import is limited to 40,000 characters including explicit omission notices.
+Imports are limited background snapshots, not complete transcripts. Repeated imports increase total context and can increase provider cost or reach the model's context limit.
+Confirmed text is sent to the selected side model's provider with the next question, not at confirmation time.
+
+Each import appears as a searchable **Main context update**, between earlier side exchanges and later questions.
+It does not count as a question or change the title.
+The existing bring-to-main scopes still export successful side Q&A only, not imported main content.
+Repeated imports do not duplicate the same entry range, and a later failed or cancelled side response does not undo a confirmed import.
+Closing and resuming retains imports in memory, including imports made before the first question; these appear as **Main context updates** until the first question supplies a title.
+
+The cursor must remain on the current main branch.
+Navigation to an ancestor or another branch, a missing cursor, or a compaction, branch summary, or context edit after the cursor blocks import without changing the side thread.
+Start a new side thread from the desired context in those cases.
+Historical-tree sources can import only when they are ancestors of the current main branch.
+Session replacement, reload, and restart discard imports with the rest of the retained side thread.
+The [runtime audit](./main-context-runtime.md) records source boundaries, tests, and terminal-only verification limits.
 
 ## Read, select, and search
 

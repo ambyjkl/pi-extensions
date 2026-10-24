@@ -16,6 +16,35 @@ import {
   validateBtwShortcutEdit,
 } from "../src/keybindings.js";
 
+test.each([false, true])("manual import fallback respects terminal mode %s", (kitty) => {
+  setKittyProtocolActive(kitty);
+  const keys = manager({ "app.thinking.cycle": ["f9", "f10"] });
+  const shortcuts = resolveBtwShortcuts({}, keys);
+  assert.deepEqual(shortcuts.keys.importMainUpdates, ["f11"]);
+  assert.equal(shortcuts.matches("\u001b[23~", "importMainUpdates"), true);
+  const unavailable = resolveBtwShortcuts({}, manager({ "app.thinking.cycle": ["f9", "f10", "f11"] }));
+  assert.deepEqual(unavailable.keys.importMainUpdates, []);
+  assert.ok(unavailable.warnings.some((warning) => warning.startsWith("importMainUpdates:")));
+});
+
+test.each([
+  ["ctrl+alt+x", "alt+ctrl+x", "\u001b\u0018"],
+  ["ctrl+[", "esc", "\u001b"],
+  ["unknown+ctrl+x", "invalid", ""],
+  ["ctrl+r", "existing bring action", "\u0012"],
+])("manual import rejects invalid or conflicting override %s (%s)", (candidate, _label, _input) => {
+  assert.ok(validateBtwShortcutEdit("importMainUpdates", candidate, { exit: "alt+ctrl+x" }, manager(), true));
+});
+
+test("manual import accepts a reachable override without displacing existing defaults", () => {
+  const keys = manager();
+  assert.equal(validateBtwShortcutEdit("importMainUpdates", "f12", {}, keys, true), undefined);
+  const shortcuts = resolveBtwShortcuts({ importMainUpdates: "f12" }, keys);
+  assert.equal(shortcuts.matches("\u001b[24~", "importMainUpdates"), true);
+  assert.deepEqual(shortcuts.keys.switchPane, ["f6"]);
+  assert.deepEqual(shortcuts.keys.bringToMain, ["ctrl+r"]);
+});
+
 const initialKitty = isKittyProtocolActive();
 afterEach(() => {
   setKittyProtocolActive(initialKitty);
@@ -109,6 +138,7 @@ test("defaults, explicit overrides, first usable inherited fallback and release 
     cycleThinkingLevel: ["shift+tab"],
     bringToMain: ["ctrl+r"],
     switchPane: ["f6"],
+    importMainUpdates: ["f9"],
   });
   assert.deepEqual(defaults.warnings, []);
   const custom = resolveBtwShortcuts({ exit: "ctrl+q", cycleThinkingLevel: "f6", bringToMain: "f7" }, manager());

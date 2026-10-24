@@ -40,7 +40,7 @@ import {
   getBtwShortcuts,
   normalizeBtwKey,
 } from "./keybindings.js";
-import type { BtwThinkingLevel, SideThreadTurn } from "./side-thread.js";
+import type { BtwThinkingLevel, SideTranscriptItem } from "./side-thread.js";
 import { formatKeyLabel, sanitizeSingleLine } from "./text.js";
 import type { BtwFullscreenLayoutComponent } from "./workspace-layout.js";
 
@@ -218,6 +218,7 @@ class PreservingScrollView extends ScrollView {
 export type TranscriptPagerAction =
   | { kind: "submit"; question: string }
   | { kind: "bringToMain"; questionDraft: string }
+  | { kind: "importMainUpdates"; questionDraft: string }
   | { kind: "close" };
 
 export interface BtwThinkingControl {
@@ -263,11 +264,12 @@ export class BtwTranscriptPager implements BtwFullscreenLayoutComponent, Focusab
   constructor(
     private readonly tui: TUI,
     private readonly theme: Theme,
-    turns: readonly SideThreadTurn[],
+    turns: readonly SideTranscriptItem[],
     private readonly onAction: (action: TranscriptPagerAction) => void,
     private readonly options: {
       model?: BtwDisplayModel;
       keybindings?: KeybindingsManager;
+      mainUpdates?: () => boolean;
       startAtBottom?: boolean;
       initialQuestion?: string;
       markdownTransformers?: readonly MarkdownTransformer[];
@@ -368,6 +370,11 @@ export class BtwTranscriptPager implements BtwFullscreenLayoutComponent, Focusab
       this.onAction({ kind: "close" });
       return;
     }
+    if (this.options.mainUpdates && this.shortcuts.matches(data, "importMainUpdates")) {
+      this.finished = true;
+      this.onAction({ kind: "importMainUpdates", questionDraft: this.editor.getExpandedText() });
+      return;
+    }
     if (this.canBringToMain && this.shortcuts.matches(data, "bringToMain")) {
       this.finished = true;
       this.onAction({ kind: "bringToMain", questionDraft: this.editor.getExpandedText() });
@@ -422,12 +429,33 @@ export class BtwTranscriptPager implements BtwFullscreenLayoutComponent, Focusab
       thinking && thinking.levels.length > 1 && this.shortcuts.keys.cycleThinkingLevel.length
         ? `${this.shortcuts.label("cycleThinkingLevel")} thinking`
         : "";
+    const importKey =
+      this.options.mainUpdates && this.shortcuts.keys.importMainUpdates.length
+        ? this.shortcuts.label("importMainUpdates")
+        : "";
+    const newMainUpdates = importKey ? this.options.mainUpdates?.() : false;
+    const importHint = importKey ? `${importKey} import main${newMainUpdates ? " (new)" : ""}` : "";
+    const compactImportHint = importKey ? `${importKey} import${newMainUpdates ? " (new)" : ""}` : "";
     const submit = submitHint(this.tui, this.keybindings, "send");
     const history = this.getMaxScrollOffset() > 0 ? pagingHint(this.tui, this.keybindings) : "";
     const switchPane = this.workspaceFocus?.shortcutLabel ? `${this.workspaceFocus.shortcutLabel} switch` : "";
     const submitKey = submit.split(" ")[0] ?? "";
     return fittingHint(width, [
-      compactHints([submit, bring ? `${bringKey} bring to main` : "", `${exit} exit`, cycle, history, switchPane]),
+      compactHints([
+        submit,
+        importHint,
+        bring ? `${bringKey} bring to main` : "",
+        `${exit} exit`,
+        cycle,
+        history,
+        switchPane,
+      ]),
+      ...(compactImportHint
+        ? [
+            compactHints([submit, compactImportHint, bring ? bringKey : "", exit, cycle, history, switchPane]),
+            compactHints([submitKey, compactImportHint, exit]),
+          ]
+        : []),
       compactHints([submit, bring ? bringKey : "", exit, cycle, history, switchPane]),
       compactHints([submitKey, bring ? bringKey : "", exit, cycle, history.replace(/ history$/u, ""), switchPane]),
       compactHints([submitKey, bring ? bringKey : "", exit, history.replace(/ history$/u, "")]),
@@ -488,7 +516,7 @@ export class BtwAnsweringView implements BtwFullscreenLayoutComponent, Focusable
   constructor(
     private readonly tui: TUI,
     private readonly theme: Theme,
-    turns: readonly SideThreadTurn[],
+    turns: readonly SideTranscriptItem[],
     pendingQuestion: string,
     private readonly onCancel: () => void,
     thinkingLevel?: BtwThinkingLevel,
@@ -734,9 +762,10 @@ export class BtwAnsweringView implements BtwFullscreenLayoutComponent, Focusable
   }
 }
 
-export function formatSideTranscript(turns: readonly SideThreadTurn[]): string {
+export function formatSideTranscript(turns: readonly SideTranscriptItem[]): string {
   return turns
     .map((turn) => {
+      if (turn.kind === "mainContext") return `Main context update\n\n${escapeTerminalControls(turn.snapshot.text)}`;
       const question = escapeTerminalControls(turn.question);
       const rawAnswer = escapeTerminalControls(turn.answer);
       const answer = turn.kind === "error" ? `Error: ${rawAnswer}` : rawAnswer;
@@ -746,7 +775,7 @@ export function formatSideTranscript(turns: readonly SideThreadTurn[]): string {
 }
 
 function buildTranscriptComponents(
-  turns: readonly SideThreadTurn[],
+  turns: readonly SideTranscriptItem[],
   theme: Theme,
   pendingQuestion?: string,
   markdownTransformers: readonly MarkdownTransformer[] = [],
@@ -755,6 +784,18 @@ function buildTranscriptComponents(
     // Pi inserts a spacer before a later user message, outside that message's
     // own Markdown padding. Keep the same separation between side exchanges.
     const preceding = index > 0 ? [new Spacer(1)] : [];
+    if (turn.kind === "mainContext") {
+      const update: Component = {
+        render: (width) =>
+          new Text(
+            theme.fg("muted", `Main context update\n\n${escapeTerminalControls(turn.snapshot.text)}`),
+            1,
+            0,
+          ).render(width),
+        invalidate() {},
+      };
+      return [...preceding, update];
+    }
     const question = new UserMessageComponent(
       escapeTerminalControls(turn.question),
       getMarkdownTheme(),

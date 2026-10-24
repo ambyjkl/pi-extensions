@@ -130,6 +130,7 @@ export async function showBtwCommandMenu(
     cycleThinkingLevel: "Cycle thinking level shortcut",
     bringToMain: "Bring to main shortcut",
     switchPane: "Switch pane shortcut",
+    importMainUpdates: "Import main updates shortcut",
   };
   const shortcutValue = (settings: BtwSettings, action: BtwShortcutAction): string => {
     if (!keybindings) return "Default";
