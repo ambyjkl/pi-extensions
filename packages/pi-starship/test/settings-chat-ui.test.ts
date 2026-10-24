@@ -214,7 +214,7 @@ test("fullscreen dock handles zero dimensions, callback theme changes, and read-
     assert.ok(!frame.some((line) => /─ Preview /u.test(line)));
     assert.equal(previewRow, frame.length - 1);
     assert.match(frame[previewRow - 3], /^─ pi-starship ─+$/u);
-    assert.match(frame[previewRow - 1], /^─ Valid · unsaved · ctrl\+s save profile · Ctrl\+C discard ─+$/u);
+    assert.match(frame[previewRow - 1], /^─ Valid · unsaved · ctrl\+s to save profile · ctrl\+c to discard ─+$/u);
     assert.ok(dimLabels.some((label) => label.includes("pi-starship")));
     assert.ok(dimLabels.some((label) => label.includes("Valid · unsaved")));
     assert.ok(!frame.some((line) => line.includes("Active file unchanged")));
@@ -369,7 +369,14 @@ for (const exit of ["escape", "hard cancel", "disposal", "owner abort"] as const
       f.tui.type("Wait");
       f.tui.send("\r");
       await started;
-      assert.match(f.tui.render().join("\n"), /Working/u);
+      assert.match(f.tui.render().join("\n"), /Working · esc to interrupt/u);
+      f.keys.setUserBindings({ "tui.editor.historyPrevious": "escape" });
+      assert.doesNotMatch(f.tui.render().join("\n"), /esc to interrupt/u);
+      f.keys.setUserBindings({});
+      f.tui.send("\x1b[200~");
+      assert.doesNotMatch(f.tui.render().join("\n"), /esc to interrupt/u);
+      f.tui.send("\x1b[201~");
+      assert.match(f.tui.render().join("\n"), /Working · esc to interrupt/u);
       assert.ok(!f.tui.render().join("\n").includes("save profile"));
       f.tui.send("\x13");
       assert.equal(f.tui.isOpen, true);
@@ -432,7 +439,7 @@ for (const [name, bindings, kitty, expected, packet] of [
         f.tui.send("\x03");
         assert.equal(await f.running, "discard");
       } else {
-        assert.ok(frame.includes(`${expected} save profile`));
+        assert.ok(frame.includes(`${expected} to save profile`));
         assert.equal(matchesKey(packet, expected), true);
         const paste = "line\n".repeat(40);
         f.tui.send(`\x1b[200~${paste}\x1b[201~`);

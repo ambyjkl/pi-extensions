@@ -169,9 +169,11 @@ export function createSettingsChatComponent(options: {
               ? "Warnings"
               : "Valid";
       const saveKey = !pending && !inPaste && draft.candidate ? settingsChatSaveShortcut(keybindings) : undefined;
+      // Match Pi core: sentence-case states and lowercase key + "to" action hints.
+      const working = !inPaste && settingsChatStopInput("\x1b", keybindings) ? "Working · esc to interrupt" : "Working";
       return {
         top: queued.length > 0 ? `pi-starship · ${queued.length} queued` : "pi-starship",
-        bottom: `${status} · unsaved · ${pending ? "Working · Cancel stop" : saveKey ? `${saveKey} save profile` : "Idle"} · Ctrl+C discard`,
+        bottom: `${status} · unsaved · ${pending ? working : saveKey ? `${saveKey} to save profile` : "Idle"} · ctrl+c to discard`,
       };
     },
     keybindings,
