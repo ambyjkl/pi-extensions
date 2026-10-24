@@ -213,6 +213,11 @@ export function readProfile(settingsPath: string, name: string): ProfileDocument
   });
 }
 
+/** Reject a removed, replaced, or edited profile before applying its reviewed snapshot. */
+export function assertProfileUnchanged(settingsPath: string, expected: ProfileDocument): void {
+  assertExpected(readProfile(settingsPath, expected.name), expected);
+}
+
 export function listProfiles(settingsPath: string): ProfileDocument[] {
   const directory = profileDirectory(settingsPath);
   if (!checkedDirectory(directory)) return [];

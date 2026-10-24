@@ -29,7 +29,27 @@ Saving requires separate confirmation, then atomically updates the file and acti
 Manual TOML edits load at the next `session_start`, including `/reload` and session replacement.
 Cancellation, disposal, invalid drafts, write failures, and runtime application failures preserve the previous file and footer.
 
-The bundled `configure-pi-starship` skill uses a separate external-edit workflow.
+Choose **Configure with agent…** for a separate, temporary configuration conversation with the bundled skill and `read`, `write`, and `edit` tools.
+The agent can write only its private draft, not the active settings file; validated mutations update the preview without `/reload`, and invalid mutations retain the last valid preview.
+Reads cover the immutable active settings snapshot, private draft, and bundled skill/source documents; the draft is limited to 64 KiB.
+The preview uses cached data without starting module commands or network requests.
+During a response, normal submission queues steering for the next assistant turn; the configured app.message.followUp action queues work after natural completion and submits normally when idle.
+The app.message.dequeue action restores pending messages to the editor; these message actions use Pi's native precedence, including explicit history bindings.
+The configured cancel action stops a response and restores undelivered messages, or opens review when idle; editor actions win review-key collisions, with Escape as a review fallback unless assigned to an editor action.
+Failed or aborted responses restore undelivered input without automatic restart.
+Ctrl+C discards the flow, clears both queues, and restores the active footer unless its session was replaced.
+When idle with a valid draft, Ctrl+S opens the Save draft as profile flow directly; its gray editor-border hint switches to F2 if Ctrl+S is reserved, or is omitted when both keys conflict.
+The review menu retains the same save action.
+Saving requires exact-draft review and a profile name; invalid or existing names are rejected without overwriting a profile.
+After saving, the host asks whether to apply that profile through managed History and atomic replacement; declining keeps the profile without changing active settings.
+Cancelling naming returns to the chat without saving; closing or session replacement removes the temporary draft, not any saved profile.
+Application checks the initial disk snapshot, loaded revision, and saved profile identity, blocks detected concurrent changes, and warns before explicitly repairing an invalid original.
+Chat content and settings read by the agent go to the selected model provider; the child uses the opening model/thinking selection with Pi authentication, has no shell tool, and does not persist its transcript or change the main conversation.
+The fullscreen view uses Pi's native user/assistant/tool message components. Short gray status and control labels sit on the editor borders; the live preview ends at the terminal bottom, in the saved footer's position.
+It shows recent output with expanded, read-only tool results; review actions expose the complete transcript and exact draft.
+Choose **Continue** to leave a document/transcript review; cancelling the review discards the flow without publishing.
+
+Outside this hosted chat, the bundled `configure-pi-starship` skill uses a separate external-edit workflow.
 Before its apply script replaces an existing document, it preserves the inspected document under `<getAgentDir()>/pi-starship/pi-starship-YYYYMMDDHHmm.toml`; these backups use local time and remain after a successful apply.
 Backups are written and flushed under a private temporary name, atomically renamed to their final private file, and followed by flushes of the backup directory and its parent directory before publication continues; a recoverable failure removes the owned temporary file and preserves the active document.
 If configuration publication fails after that backup is durable, the failure reports its retained path; cleanup failures report both their operation and cause without hiding the primary failure.
@@ -94,7 +114,7 @@ The native Pi editor has no public abort method; session cancellation removes th
 ### Recovery history
 
 Managed active-file replacements preserve the previous document in `<getAgentDir()>/pi-starship/history/<timestamp>-<random-id>.toml` before writing the replacement.
-Editor, preset, profile, restore, and Gist application use this policy.
+Editor, configuration-chat save, preset, profile, restore, and Gist application use this policy.
 A missing file or a byte-identical no-op creates no recovery copy.
 Backup failure blocks replacement; runtime-application failure attempts guarded disk/runtime restoration and retains the backup.
 A recovery copy can therefore come from an unsuccessful application attempt; it is not proof that a candidate was applied.

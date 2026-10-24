@@ -12,6 +12,7 @@ import { createTuiHarness } from "@narumitw/pi-tui-kit/testing";
 import { test } from "vitest";
 import { listFiles, registerRuntimeBuilderContract } from "../../../test/runtime-builder-contract.js";
 import { createMockContext } from "../../../test/support.js";
+import { response, settingsChatCustom, testModel } from "./settings-chat-support.js";
 
 const { packageRoot, loadBuilder } = registerRuntimeBuilderContract({
   packageId: "pi-starship",
@@ -23,6 +24,11 @@ const { packageRoot, loadBuilder } = registerRuntimeBuilderContract({
     "src/command-profiles.ts",
     "src/profile-store.ts",
     "src/command-commit.ts",
+    "src/command-settings-chat.ts",
+    "src/settings-agent.ts",
+    "src/settings-chat-ui.ts",
+    "src/settings-chat-transcript.ts",
+    "src/settings-draft.ts",
     "src/presets/catalog.ts",
     "src/runtime/cloud.ts",
     "src/runtime/deployment.ts",
@@ -31,7 +37,7 @@ const { packageRoot, loadBuilder } = registerRuntimeBuilderContract({
     "src/runtime/languages.ts",
     "src/runtime/package.ts",
   ],
-  forbiddenEagerExternals: ["@narumitw/pi-tui-kit", "yaml"],
+  forbiddenEagerExternals: ["@narumitw/pi-tui-kit", "@earendil-works/pi-agent-core", "yaml"],
   matchExternalSubpaths: false,
   includeDynamicExternals: true,
 });
@@ -120,7 +126,7 @@ test("generated runtime is loadable by Pi's Jiti resource loader", async () => {
     assert.ok(extension);
     loaded.runtime.getThinkingLevel = () => "off";
     const tui = createTuiHarness({ width: 80, rows: 24 });
-    const context = createMockContext({ mode: "tui", hasUI: true, custom: tui.custom });
+    const context = createMockContext({ mode: "tui", hasUI: true, custom: settingsChatCustom(tui.custom) });
     const emit = async (name: "session_start" | "session_shutdown") => {
       const event = name === "session_start" ? { type: name, reason: "startup" } : { type: name };
       for (const handler of extension.handlers.get(name) ?? []) await handler(event, context.ctx as ExtensionContext);
@@ -144,6 +150,32 @@ test("generated runtime is loadable by Pi's Jiti resource loader", async () => {
         await running;
         assert.match(profileFrame, /Profiles/u);
         assert.match(profileFrame, /Save current/u);
+
+        const ctx = context.ctx as ExtensionCommandContext;
+        ctx.model = { ...testModel, input: ["text"] };
+        let skillLoaded = false;
+        ctx.modelRegistry.streamSimple = (_model, request) => {
+          const system = request.messages[0];
+          skillLoaded =
+            system?.role === "system" &&
+            typeof system.content === "string" &&
+            system.content.includes("# Configure pi-starship");
+          return response([{ type: "text", text: "Generated chat ready" }]);
+        };
+        const chat = command.handler("", ctx);
+        await tui.waitForOpen();
+        tui.press("end");
+        tui.press("tui.select.up");
+        tui.press("tui.select.confirm");
+        await tui.waitForOpen();
+        const chatFrame = tui.render().join("\n");
+        tui.type("Explain the model module");
+        tui.send("\r");
+        await tui.waitForPending();
+        tui.press("ctrl+c");
+        await chat;
+        assert.match(chatFrame, /─ pi-starship /u);
+        assert.equal(skillLoaded, true);
       } finally {
         tui.dispose();
         await running;

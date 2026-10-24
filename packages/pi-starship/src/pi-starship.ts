@@ -92,6 +92,7 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
   let sessionGeneration = 0;
   let menuController = new AbortController();
   let commandInFlight: object | undefined;
+  let chatCleanup: (() => Promise<void>) | undefined;
   let sessionOwner: ExtensionContext["sessionManager"] | undefined;
   let activeTarget: RefreshTarget | undefined;
   let eventDebounceTimer: ReturnType<typeof setTimeout> | undefined;
@@ -384,6 +385,12 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
   const configPath = settingsFilePath(getAgentDir());
   const commandOptions: StarshipCommandOptions = {
     settingsPath: configPath,
+    registerChatCleanup(cleanup) {
+      chatCleanup = cleanup;
+      return () => {
+        if (chatCleanup === cleanup) chatCleanup = undefined;
+      };
+    },
     getLoaded: () => loaded ?? loadStarshipConfig(configPath),
     getLoadedRevision: () => loadedRevision,
     getInspection: () => {
@@ -463,7 +470,7 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
     refresh();
   });
 
-  pi.on("session_shutdown", (_event, ctx) => {
+  pi.on("session_shutdown", async (_event, ctx) => {
     if (sessionOwner !== ctx.sessionManager) return;
     sessionOwner = undefined;
     commandInFlight = undefined;
@@ -487,6 +494,9 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
     runtime.footerWidth = undefined;
     ctx.ui.setFooter(undefined);
     ctx.ui.setStatus("starship", undefined);
+    const cleanup = chatCleanup;
+    chatCleanup = undefined;
+    await cleanup?.();
   });
 
   pi.on("model_select", () => refresh());
