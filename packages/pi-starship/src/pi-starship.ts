@@ -448,6 +448,7 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
       return {
         signal: menuController.signal,
         isCurrent: () => generation === sessionGeneration && !menuController.signal.aborted,
+        canRestoreTerminal: () => sessionOwner !== undefined,
       };
     },
     apply(next, ctx) {

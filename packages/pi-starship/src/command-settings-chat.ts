@@ -8,7 +8,7 @@ import { saveAsProfile } from "./command-profiles.js";
 import type { StarshipCommandOptions } from "./commands.js";
 import { assertProfileUnchanged } from "./profile-store.js";
 import { createSettingsAgent, starshipPackageRoot } from "./settings-agent.js";
-import { type ChatViewState, showSettingsChat } from "./settings-chat-ui.js";
+import { type ChatViewState, type SettingsChatAction, showSettingsChat } from "./settings-chat-ui.js";
 import { createSettingsDraft } from "./settings-draft.js";
 import { settingsSnapshots } from "./settings-snapshots.js";
 
@@ -23,10 +23,12 @@ export async function showSettingsAgentChat(
     return captureCommitExpectation(options);
   });
   if (!expected || base.signal.aborted || !base.isCurrent()) return "close";
+  const chatLifetime = new AbortController();
   const owner: WorkflowOwner = {
-    signal: base.signal,
-    isCurrent: () => commitOwnerCurrent(options, base, expected),
+    signal: AbortSignal.any([base.signal, chatLifetime.signal]),
+    isCurrent: () => !chatLifetime.signal.aborted && commitOwnerCurrent(options, base, expected),
     isSessionCurrent: base.isSessionCurrent ?? base.isCurrent,
+    canRestoreTerminal: base.canRestoreTerminal,
   };
   const packageRoot = starshipPackageRoot();
   const draft = createSettingsDraft({
@@ -41,12 +43,16 @@ export async function showSettingsAgentChat(
   });
   let agent: ReturnType<typeof createSettingsAgent> | undefined;
   let closing: Promise<void> | undefined;
+  let activeChat: Promise<SettingsChatAction> | undefined;
   const cleanup = () => {
     if (closing) return closing;
+    chatLifetime.abort();
     agent?.abort();
+    const pendingChat = activeChat;
     closing = (async () => {
       try {
-        await agent?.waitForIdle();
+        // Shutdown must join terminal teardown, not only the model request.
+        await Promise.all([agent?.waitForIdle(), pendingChat]);
       } finally {
         agent?.reset();
         draft.dispose();
@@ -70,7 +76,13 @@ export async function showSettingsAgentChat(
     if (!owner.isCurrent()) return "close";
     agent = createSettingsAgent(ctx, draft, packageRoot);
     while (owner.isCurrent()) {
-      const action = await showSettingsChat(ctx, agent, draft, state, owner, preview);
+      activeChat = showSettingsChat(ctx, agent, draft, state, owner, preview);
+      let action: SettingsChatAction;
+      try {
+        action = await activeChat;
+      } finally {
+        activeChat = undefined;
+      }
       if (!owner.isCurrent() || action === "discard") return "close";
       if (!draft.candidate) continue;
       const candidate = draft.candidate;

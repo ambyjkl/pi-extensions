@@ -81,6 +81,7 @@ export async function handleStarshipCommand(
     signal,
     isCurrent: () => !signal.aborted && base.isCurrent(),
     isSessionCurrent: () => base.isSessionCurrent?.() ?? base.isCurrent(),
+    canRestoreTerminal: base.canRestoreTerminal,
   };
   // Pi delivers bracketed paste as one framed packet. Exact key matching does
   // not treat controls inside pasted text as cancellation or consume native input.

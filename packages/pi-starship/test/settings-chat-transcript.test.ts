@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { stripVTControlCharacters } from "node:util";
 import { Agent, type AgentMessage } from "@earendil-works/pi-agent-core";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import {
@@ -15,13 +16,13 @@ import { response, testModel } from "./settings-chat-support.js";
 
 initTheme("dark", false);
 const cwd = "/private-settings-draft";
-function fixture(messages: AgentMessage[]) {
+function fixture(messages: AgentMessage[], expanded = true) {
   const agent = new Agent({
     initialState: { model: { ...testModel, input: ["text"] }, messages },
     streamFn: () => response([]),
   });
   const tui = { terminal: { rows: 24, columns: 80 }, requestRender() {} } as TUI;
-  return { agent, tui, transcript: createSettingsChatTranscript(agent, tui, cwd) };
+  return { agent, tui, transcript: createSettingsChatTranscript(agent, tui, cwd, expanded) };
 }
 
 test("user and assistant blocks exactly reuse native Markdown, backgrounds, padding, and later-question spacing", async () => {
@@ -81,6 +82,91 @@ test("message anchors retain exact rows through eviction and invalidation", () =
     }
     f.transcript.dispose();
     assert.equal(f.transcript.anchorAt(0), undefined);
+  } finally {
+    f.transcript.dispose();
+  }
+});
+
+for (const [beforeWidth, afterWidth] of [
+  [80, 35],
+  [35, 100],
+]) {
+  test(`message anchors retain the first visible content across ${beforeWidth} to ${afterWidth} reflow`, () => {
+    const content = Array.from({ length: 100 }, (_, index) => `word-${index}`).join(" ");
+    const f = fixture([{ role: "user", content, timestamp: 0 }]);
+    try {
+      const before = f.transcript.render(beforeWidth);
+      const row = before.findIndex((line) => stripVTControlCharacters(line).includes("word-42"));
+      const firstWord = stripVTControlCharacters(before[row]).trim().split(/\s/u)[0];
+      const anchor = f.transcript.anchorAt(row);
+      assert.ok(anchor);
+      const after = f.transcript.render(afterWidth);
+      assert.ok(stripVTControlCharacters(after[f.transcript.rowAt(anchor)]).includes(firstWord));
+    } finally {
+      f.transcript.dispose();
+    }
+  });
+}
+
+for (const [beforeWidth, afterWidth] of [
+  [80, 35],
+  [35, 100],
+]) {
+  test(`Markdown decoration does not shift content anchors across ${beforeWidth} to ${afterWidth} reflow`, async () => {
+    const text =
+      "# Heading\n\n" +
+      "first paragraph words ".repeat(30) +
+      "\n\n---\n\n" +
+      Array.from({ length: 100 }, (_, index) => `word-${index}`).join(" ");
+    const message = await response([{ type: "text", text }]).result();
+    const f = fixture([message]);
+    try {
+      const before = f.transcript.render(beforeWidth);
+      const row = before.findIndex((line) => stripVTControlCharacters(line).includes("word-42"));
+      const firstWord = stripVTControlCharacters(before[row]).trim().split(/\s/u)[0];
+      const anchor = f.transcript.anchorAt(row);
+      assert.ok(anchor);
+      const after = f.transcript.render(afterWidth);
+      assert.ok(stripVTControlCharacters(after[f.transcript.rowAt(anchor)]).includes(firstWord));
+    } finally {
+      f.transcript.dispose();
+    }
+  });
+}
+
+test("tool collapse retains a later tool heading within the same assistant message", async () => {
+  const calls = ["first-file", "second-file"].map((path) => ({
+    type: "toolCall" as const,
+    id: path,
+    name: "read",
+    arguments: { path },
+  }));
+  const assistant = await response(calls, "toolUse").result();
+  const f = fixture([
+    assistant,
+    ...calls.map((call) => ({
+      role: "toolResult" as const,
+      toolCallId: call.id,
+      toolName: "read",
+      content: [{ type: "text" as const, text: "output\n".repeat(60) }],
+      isError: false,
+      timestamp: 0,
+    })),
+  ]);
+  try {
+    const before = f.transcript.render(80);
+    const row = before.findIndex((line) => stripVTControlCharacters(line).includes("second-file"));
+    const anchor = f.transcript.anchorAt(row);
+    assert.ok(anchor);
+    f.transcript.toggleTools();
+    const collapsed = f.transcript.render(80);
+    assert.equal(
+      f.transcript.rowAt(anchor),
+      collapsed.findIndex((line) => stripVTControlCharacters(line).includes("second-file")),
+    );
+    f.transcript.toggleTools();
+    f.transcript.render(80);
+    assert.equal(f.transcript.rowAt(anchor), row);
   } finally {
     f.transcript.dispose();
   }
