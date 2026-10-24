@@ -49,7 +49,7 @@ Do not enable this with `@narumitw/pi-statusline`: both own Pi's footer, and Pi 
 ## 🚀 Quick start
 
 Start Pi with the extension to use the built-in footer without creating a settings file.
-Run `/starship` and choose **Configure with agent…** for edits and explanations, or choose a preset.
+Run `/starship` and choose **Configure with agent** for edits and explanations, or choose a preset.
 
 The bundled configuration skill is manual-only and is not available for automatic model invocation.
 Run `/skill:configure-pi-starship` before asking Pi to explain or edit `pi-starship.toml`:
@@ -61,7 +61,7 @@ Run `/skill:configure-pi-starship` before asking Pi to explain or edit `pi-stars
 
 The skill was renamed from `configuring-pi-starship`; use `/skill:configure-pi-starship` instead of the old invocation.
 The skill loads the relevant reference and validates file edits.
-For a separate preview-only conversation, open `/starship` → **Configure with agent…** instead.
+For a separate preview-only conversation, open `/starship` → **Configure with agent** instead.
 It does not cover general TOML, shell Starship configuration, extension source development, or unrelated footer work.
 
 ## 💬 Commands
@@ -115,7 +115,7 @@ The six Jujutsu/system modules require explicit `disabled = false` plus a root r
 
 ## 🧠 Configuration chat
 
-Open `/starship` → **Configure with agent…** to adjust the footer in a separate, temporary conversation.
+Open `/starship` → **Configure with agent** to adjust the footer in a separate, temporary conversation.
 The agent explicitly loads `configure-pi-starship` and uses the model and thinking level selected when the chat opens, through Pi's current provider authentication.
 The main conversation, tools, and model selection are unchanged; the chat is not persisted and has no automatic compaction or retry workflow.
 Its usage is separate from the main session's usage totals.
