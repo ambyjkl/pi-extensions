@@ -32,6 +32,7 @@ export function createSettingsChatTranscript(agent: Agent, tui: TUI, cwd: string
   };
   let streaming: AssistantMessageComponent | undefined;
   let disposed = false;
+  let expanded = true;
   return {
     render(width: number): string[] {
       if (disposed || width <= 0) return [];
@@ -66,8 +67,7 @@ export function createSettingsChatTranscript(agent: Agent, tui: TUI, cwd: string
               tui,
               sanitizeTerminalDocument(cwd),
             );
-            // Expanded output avoids advertising a tool-expand shortcut that this view does not own.
-            component.setExpanded(true);
+            component.setExpanded(expanded);
             component.setArgsComplete();
             component.markExecutionStarted();
             tool = { component };
@@ -121,6 +121,12 @@ export function createSettingsChatTranscript(agent: Agent, tui: TUI, cwd: string
       for (const message of messages.keys()) if (!activeMessages.has(message)) messages.delete(message);
       for (const id of tools.keys()) if (!activeTools.has(id)) tools.delete(id);
       return lines;
+    },
+    toggleTools() {
+      if (disposed) return;
+      expanded = !expanded;
+      for (const { component } of tools.values()) component.setExpanded(expanded);
+      tui.requestRender();
     },
     invalidate() {
       if (disposed) return;

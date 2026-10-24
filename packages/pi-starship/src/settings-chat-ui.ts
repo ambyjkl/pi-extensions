@@ -39,7 +39,14 @@ function saveKeyReserved(data: string, keybindings: Pick<KeybindingsManager, "ma
       (action) => editorKeys.matches(data, action) || keybindings.matches(data, action),
     ) ||
     (
-      ["app.clipboard.pasteImage", "app.interrupt", "app.exit", "app.message.followUp", "app.message.dequeue"] as const
+      [
+        "app.clipboard.pasteImage",
+        "app.interrupt",
+        "app.exit",
+        "app.message.followUp",
+        "app.message.dequeue",
+        "app.tools.expand",
+      ] as const
     ).some((action) => keybindings.matches(data, action))
   );
 }
@@ -246,6 +253,7 @@ export function createSettingsChatComponent(options: {
   editor.onSubmit = (input) => submit(input, "steer");
   editor.onAction("app.message.followUp", () => submit(editor.getExpandedText().trim(), "followUp"));
   editor.onAction("app.message.dequeue", restoreQueue);
+  editor.onAction("app.tools.expand", () => transcript.toggleTools());
   return {
     get focused() {
       return editor.focused;

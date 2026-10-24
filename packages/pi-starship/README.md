@@ -131,6 +131,7 @@ These tool limits are not an operating-system sandbox for extension code.
 The native editor retains editing, newline, submission, and large-paste behavior.
 While the agent runs, normal submission queues a steering message for the next assistant turn; `app.message.followUp` queues a message after the current task finishes.
 The default follow-up key is Alt+Enter, or Ctrl+Q on Windows and WSL; when idle, it submits normally.
+Tool output starts expanded. Press Ctrl+O to collapse or expand all tool output in this conversation; this follows Pi's `app.tools.expand` keybinding and does not change the main conversation.
 Pending messages appear in gray above the editor, with a count on its upper border; the view shows at most three pending rows.
 Use `app.message.dequeue` (Alt+Up, or Alt+Q on Windows and WSL) to restore queued messages to the editor.
 These message shortcuts use Pi's configured bindings and native precedence, including explicit history actions taking priority.
