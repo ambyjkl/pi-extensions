@@ -170,7 +170,12 @@ else if (args[0] === 'tag') console.log(state.tags.join('\\n'));
         timeout: 4_000,
       });
     },
-    async runDirect() {
+    async runDirect(
+      options: {
+        intercept?: (args: string[]) => { code: number; stdout: string; stderr: string } | undefined;
+        wait?: () => Promise<void>;
+      } = {},
+    ) {
       const module = (await import(pathToFileURL(script).href)) as {
         runCommand: (command: string, args: string[], options: { env?: NodeJS.ProcessEnv }) => Promise<unknown>;
         publishCoordinatedPackages: (options: unknown) => Promise<number>;
@@ -180,9 +185,14 @@ else if (args[0] === 'tag') console.log(state.tags.join('\\n'));
         packDir,
         output,
         signal: AbortSignal.timeout(4_000),
-        wait: async () => {},
-        run: (command: string, args: string[], options: { env?: NodeJS.ProcessEnv }) =>
-          module.runCommand(command, args, { ...options, env: { ...options.env, ...this.env } }),
+        wait: options.wait ?? (async () => {}),
+        run: (command: string, args: string[], commandOptions: { env?: NodeJS.ProcessEnv }) => {
+          const intercepted = command === "npm" || command === "npm.cmd" ? options.intercept?.(args) : undefined;
+          return (
+            intercepted ??
+            module.runCommand(command, args, { ...commandOptions, env: { ...commandOptions.env, ...this.env } })
+          );
+        },
       });
     },
     cleanup: () => rmSync(cwd, { recursive: true, force: true }),

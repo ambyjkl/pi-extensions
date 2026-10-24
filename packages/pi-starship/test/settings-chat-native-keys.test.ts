@@ -18,6 +18,7 @@ const definitions = {
   "app.exit": { defaultKeys: "ctrl+d" },
   "app.message.followUp": { defaultKeys: "alt+enter" },
   "app.message.dequeue": { defaultKeys: "alt+up" },
+  "app.tools.expand": { defaultKeys: "ctrl+o" },
 } as const;
 
 function compare(
@@ -53,6 +54,7 @@ function compare(
       editor.onSubmit = (text) => events[index]?.push(`submit:${text}`);
       editor.onAction("app.message.followUp", () => events[index]?.push("followUp"));
       editor.onAction("app.message.dequeue", () => events[index]?.push("dequeue"));
+      editor.onAction("app.tools.expand", () => events[index]?.push("expand"));
       editor.onPasteImage = () => events[index]?.push("pasteImage");
       editor.render(40);
     }
@@ -91,6 +93,7 @@ const earlier = [
   "app.interrupt",
   "app.message.followUp",
   "app.message.dequeue",
+  "app.tools.expand",
 ];
 for (const action of earlier) {
   test(`native ${action} wins a remapped page collision`, () => {
@@ -262,6 +265,7 @@ for (const [action, input] of [
   ["app.clipboard.pasteImage", "\x16"],
   ["app.message.followUp", "\x1b\r"],
   ["app.message.dequeue", "\x1b[1;3A"],
+  ["app.tools.expand", "\x0f"],
 ] as const) {
   test(`${action} leaves pending native jump active`, () => {
     compare({ "tui.editor.pageUp": "x" }, ({ native, chat, pages }) => {

@@ -26,7 +26,7 @@ import type { WorkflowOwner } from "./command-configuration.js";
 import { createSettingsChatTranscript, type SettingsChatAnchor } from "./settings-chat-transcript.js";
 import type { SettingsDraft } from "./settings-draft.js";
 
-export type SettingsChatAction = "review" | "save" | "discard";
+export type SettingsChatAction = "save" | "discard";
 
 const SAVE_SHORTCUTS = [
   { key: "ctrl+s", inputs: ["\x13", "\x1b[115;5u", "\x1b[27;5;115~"] },
@@ -41,7 +41,14 @@ function saveKeyReserved(data: string, keybindings: Pick<KeybindingsManager, "ma
       (action) => editorKeys.matches(data, action) || keybindings.matches(data, action),
     ) ||
     (
-      ["app.clipboard.pasteImage", "app.interrupt", "app.exit", "app.message.followUp", "app.message.dequeue"] as const
+      [
+        "app.clipboard.pasteImage",
+        "app.interrupt",
+        "app.exit",
+        "app.message.followUp",
+        "app.message.dequeue",
+        "app.tools.expand",
+      ] as const
     ).some((action) => keybindings.matches(data, action))
   );
 }
@@ -59,24 +66,6 @@ export function settingsChatSaveShortcut(
 export interface ChatViewState {
   input: string;
   error: string;
-}
-
-/** Frame the review menu's footer preview without changing its render width. */
-export function renderSettingsChatPreview(
-  width: number,
-  preview: readonly string[],
-  theme: Pick<Theme, "fg">,
-): string[] {
-  if (width <= 0) return [];
-  const ruleStyle = (text: string) => theme.fg("border", text);
-  const top = new HorizontalRule({
-    label: "Preview",
-    labelAlignment: "left",
-    ruleStyle,
-    labelStyle: (text) => theme.fg("dim", text),
-  });
-  const bottom = new HorizontalRule({ ruleStyle });
-  return [top.render(width)[0] ?? "", ...preview, bottom.render(width)[0] ?? ""];
 }
 
 // Installed Editor.handleInput actions before pageUp/pageDown, in native order.
@@ -168,11 +157,13 @@ export class SettingsChatEditor extends CustomEditor {
     const history =
       this.chatKeys.matches(data, "tui.editor.historyPrevious") ||
       this.chatKeys.matches(data, "tui.editor.historyNext");
-    const messageAction =
+    const registeredAction =
       !interrupt &&
       !history &&
-      (this.chatKeys.matches(data, "app.message.followUp") || this.chatKeys.matches(data, "app.message.dequeue"));
-    if (appConsumes || messageAction) {
+      (this.chatKeys.matches(data, "app.message.followUp") ||
+        this.chatKeys.matches(data, "app.message.dequeue") ||
+        this.chatKeys.matches(data, "app.tools.expand"));
+    if (appConsumes || registeredAction) {
       super.handleInput(data);
       return;
     }
@@ -224,8 +215,8 @@ export class SettingsChatEditor extends CustomEditor {
   }
 }
 
-/** Editor actions win collisions. Escape remains a review fallback for unusable cancel settings. */
-export function settingsChatReviewInput(data: string, keybindings: Pick<KeybindingsManager, "matches">): boolean {
+/** Editor actions win collisions. Escape remains a stop fallback for unusable cancel settings. */
+export function settingsChatStopInput(data: string, keybindings: Pick<KeybindingsManager, "matches">): boolean {
   const editorKeys = getKeybindings();
   const parsed = parseKey(data);
   const textKey = parsed?.startsWith("shift+") ? parsed.slice(6) : parsed;
@@ -246,26 +237,6 @@ export function settingsChatReviewInput(data: string, keybindings: Pick<Keybindi
       .filter((key) => key.startsWith("tui.editor.") || key.startsWith("tui.input."))
       .some((key) => editorKeys.matches(data, key));
   return !editing && (keybindings.matches(data, "tui.select.cancel") || matchesKey(data, Key.escape));
-}
-
-export function settingsChatTranscript(agent: Agent): string[] {
-  return [...agent.state.messages, ...(agent.state.streamingMessage ? [agent.state.streamingMessage] : [])]
-    .filter((message) => message.role !== "system")
-    .flatMap((message) => {
-      if (!("content" in message) || !Array.isArray(message.content)) return [];
-      const label = message.role === "user" ? "You" : message.role === "assistant" ? "Agent" : "Tool";
-      const text = message.content
-        .map((part) => {
-          if (part.type === "text") return part.text;
-          if (part.type === "toolCall") return `Using ${part.name}…`;
-          return "";
-        })
-        .filter(Boolean)
-        .join("\n");
-      const error = message.role === "assistant" ? message.errorMessage : undefined;
-      const output = [text, error].filter(Boolean).join("\n");
-      return output ? [`${label}: ${sanitizeTerminalDocument(output)}`] : [];
-    });
 }
 
 export function createSettingsChatComponent(options: {
@@ -311,7 +282,7 @@ export function createSettingsChatComponent(options: {
       const saveKey = !pending && !inPaste && draft.candidate ? settingsChatSaveShortcut(keybindings) : undefined;
       return {
         top: queued.length > 0 ? `pi-starship · ${queued.length} queued` : "pi-starship",
-        bottom: `${status} · unsaved · ${pending ? "Working · Cancel stop" : saveKey ? `${saveKey} save profile` : "Cancel review"} · Ctrl+C discard`,
+        bottom: `${status} · unsaved · ${pending ? "Working · Cancel stop" : saveKey ? `${saveKey} save profile` : "Idle"} · Ctrl+C discard`,
       };
     },
     keybindings,
@@ -395,6 +366,7 @@ export function createSettingsChatComponent(options: {
   editor.onSubmit = (input) => submit(input, "steer");
   editor.onAction("app.message.followUp", () => submit(editor.getExpandedText().trim(), "followUp"));
   editor.onAction("app.message.dequeue", restoreQueue);
+  editor.onAction("app.tools.expand", () => transcript.toggleTools());
   return {
     get focused() {
       return editor.focused;
@@ -479,14 +451,11 @@ export function createSettingsChatComponent(options: {
       } else if (saveKey && matchesKey(data, saveKey) && !saveKeyReserved(data, keybindings)) {
         state.input = editor.getExpandedText();
         options.complete("save");
-      } else if (settingsChatReviewInput(data, keybindings)) {
+      } else if (settingsChatStopInput(data, keybindings)) {
         if (pending) {
           stopping = true;
           restoreQueue();
           agent.abort();
-        } else {
-          state.input = editor.getExpandedText();
-          options.complete("review");
         }
       } else editor.handleInput(data);
       render();

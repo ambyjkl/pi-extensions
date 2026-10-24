@@ -4,17 +4,11 @@ import { defineMenu, runMenu } from "@narumitw/pi-tui-kit";
 import { sanitizeTerminalDocument } from "@narumitw/pi-tui-kit/terminal-document";
 import { captureCommitExpectation, commitActiveDocument, commitOwnerCurrent } from "./command-commit.js";
 import type { WorkflowOwner } from "./command-configuration.js";
-import { showPreviewActionMenu } from "./command-preview.js";
 import { saveAsProfile } from "./command-profiles.js";
 import type { StarshipCommandOptions } from "./commands.js";
 import { assertProfileUnchanged } from "./profile-store.js";
 import { createSettingsAgent, starshipPackageRoot } from "./settings-agent.js";
-import {
-  type ChatViewState,
-  renderSettingsChatPreview,
-  settingsChatTranscript,
-  showSettingsChat,
-} from "./settings-chat-ui.js";
+import { type ChatViewState, showSettingsChat } from "./settings-chat-ui.js";
 import { createSettingsDraft } from "./settings-draft.js";
 import { settingsSnapshots } from "./settings-snapshots.js";
 
@@ -78,43 +72,7 @@ export async function showSettingsAgentChat(
     while (owner.isCurrent()) {
       const action = await showSettingsChat(ctx, agent, draft, state, owner, preview);
       if (!owner.isCurrent() || action === "discard") return "close";
-      const result =
-        action === "save"
-          ? { kind: "selected" as const, value: "save" as const }
-          : await showPreviewActionMenu(
-              ctx,
-              "Configuration chat — preview only",
-              (width, theme) => [
-                "The agent has not changed the active settings file.",
-                "Preview uses cached data; enabling modules here does not run commands or network requests.",
-                ...renderSettingsChatPreview(width, preview(width), theme),
-                ...sanitizeTerminalDocument(draft.diagnostics).split("\n"),
-              ],
-              [
-                { value: "continue", label: "Continue conversation" },
-                { value: "document", label: "Review exact draft…" },
-                { value: "transcript", label: "Review full conversation…" },
-                ...(draft.candidate ? [{ value: "save" as const, label: "Save draft as profile…" }] : []),
-                { value: "discard", label: "Discard preview and close" },
-              ],
-              owner.signal,
-              owner.isCurrent,
-            );
-      if (!owner.isCurrent() || !result || result.kind === "closed") return "close";
-      if (result?.kind !== "selected") continue;
-      if (result.value === "discard") return "close";
-      if (result.value === "document" || result.value === "transcript") {
-        const reviewed = await reviewText(
-          ctx,
-          owner,
-          result.value === "document" ? "Settings draft" : "Configuration conversation",
-          result.value === "document" ? draft.rawDocument : settingsChatTranscript(agent).join("\n\n"),
-          result.value === "document",
-        );
-        if (!owner.isCurrent() || !reviewed) return "close";
-        continue;
-      }
-      if (result.value !== "save" || !draft.candidate) continue;
+      if (!draft.candidate) continue;
       const candidate = draft.candidate;
       const revision = draft.revision;
       const reviewed = await reviewText(ctx, owner, "Review draft before saving", candidate.rawDocument ?? "", true);

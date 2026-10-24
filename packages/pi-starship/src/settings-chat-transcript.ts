@@ -59,6 +59,7 @@ export function createSettingsChatTranscript(agent: Agent, tui: TUI, cwd: string
   let spans: Array<{ message: AgentMessage | symbol; start: number; end: number }> = [];
   let streaming: AssistantMessageComponent | undefined;
   let disposed = false;
+  let expanded = true;
   return {
     render(width: number): string[] {
       spans = [];
@@ -94,8 +95,7 @@ export function createSettingsChatTranscript(agent: Agent, tui: TUI, cwd: string
               tui,
               sanitizeTerminalDocument(cwd),
             );
-            // Expanded output avoids advertising a tool-expand shortcut that this view does not own.
-            component.setExpanded(true);
+            component.setExpanded(expanded);
             component.setArgsComplete();
             component.markExecutionStarted();
             tool = { component };
@@ -163,6 +163,12 @@ export function createSettingsChatTranscript(agent: Agent, tui: TUI, cwd: string
       const span = spans.find((item) => item.message === anchor.message);
       // If the anchored message was evicted, show the oldest retained content.
       return span ? Math.max(0, span.start + Math.min(anchor.row, span.end - span.start - 1)) : 0;
+    },
+    toggleTools() {
+      if (disposed) return;
+      expanded = !expanded;
+      for (const { component } of tools.values()) component.setExpanded(expanded);
+      tui.requestRender();
     },
     invalidate() {
       if (disposed) return;

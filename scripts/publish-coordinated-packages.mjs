@@ -15,6 +15,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { stripVTControlCharacters } from "node:util";
 import rcompare from "semver/functions/rcompare.js";
 import satisfies from "semver/functions/satisfies.js";
 import minVersion from "semver/ranges/min-version.js";
@@ -146,52 +147,141 @@ function registryFlags(manifest) {
 
 function npmError(result) {
   try {
-    return JSON.parse(result.stdout).error?.code;
+    const code = JSON.parse(result.stdout)?.error?.code;
+    return typeof code === "string" ? code : undefined;
   } catch {
     return undefined;
   }
 }
 
+// Sanitize the complete value before truncation. Never log command arguments or config.
+export function sanitizeRegistryDiagnostic(value) {
+  // Normalize escaped JSON delimiters, including nested JSON error summaries.
+  // This is display-only; the original response remains authoritative.
+  let normalized = String(value);
+  for (let pass = 0; pass < 8; pass++) {
+    const decoded = normalized
+      // The optional suffix makes unmatched runs succeed too. Each run is
+      // consumed once instead of retrying a required suffix at every backslash.
+      .replace(/\\+(?:[uU]([a-fA-F0-9]{4})|([nrtbf"'/:=]))?/gu, (run, hex, delimiter) => {
+        if (hex !== undefined) return String.fromCharCode(Number.parseInt(hex, 16));
+        if (delimiter !== undefined) return "nrtbf".includes(delimiter) ? " " : delimiter;
+        return run;
+      });
+    if (decoded === normalized) break;
+    normalized = decoded;
+  }
+  // Bound normalization work and fail closed on deeper escape nesting.
+  if (/\\(?:u[a-f0-9]{4}|["'/:=nrtbf])/iu.test(normalized)) return "[omitted: nested escaped output]";
+  const safe = stripVTControlCharacters(normalized)
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: Remove untrusted terminal controls from diagnostic output.
+    .replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/gu, "")
+    // The legacy Actions parser accepts its prefix anywhere in a line.
+    .replaceAll("##[", "## [")
+    // Conservatively omit the rest of a field after credentials: npm can return
+    // incomplete, escaped, or multiline values without a reliable closing delimiter.
+    .replace(
+      /((?:(?:proxy-)?authorization|_authToken|_auth|_password|password|token|secret|api[_-]?key)["']?\s*[:=]\s*)[\s\S]*/giu,
+      "$1[REDACTED]",
+    )
+    .replace(/https?:\/\/[\s\S]*/giu, "[REDACTED URL]")
+    .replace(/\b(?:npm_[a-z0-9]+|gh[pousr]_[a-z0-9]+|github_pat_[a-z0-9_]+)\b/giu, "[REDACTED]");
+  return safe.length > 2_000 ? `${safe.slice(0, 2_000)} [truncated]` : safe;
+}
+
+function registryDiagnostic(context, result, disposition, error) {
+  const lines = [
+    `Registry check: ${context.spec}; stage: ${context.stage}; attempt: ${context.attempt}; ${disposition}`,
+    `Exit code: ${result?.code ?? "unavailable"}; npm error: ${result ? (npmError(result) ?? "unavailable") : "unavailable"}`,
+  ];
+  if (error !== undefined) lines.push(`Reason: ${error instanceof Error ? error.message : String(error)}`);
+  if (result?.stdout) lines.push(`stdout: ${result.stdout}`);
+  if (result?.stderr) lines.push(`stderr: ${result.stderr}`);
+  // Prefix every line to block modern Actions commands. The sanitizer removes
+  // legacy prefixes because the runner accepts them anywhere in a line.
+  return lines
+    .map((line) => sanitizeRegistryDiagnostic(line))
+    .join("\n")
+    .split(/\r?\n/u)
+    .map((line) => `[registry] ${line}`)
+    .join("\n");
+}
+
+async function registryRequest(context, run, args, options) {
+  try {
+    return await run(npm, args, options);
+  } catch (error) {
+    throw new Error(registryDiagnostic(context, undefined, "stop", error));
+  }
+}
+
+function registryResponse(context, result, read) {
+  try {
+    return read();
+  } catch (error) {
+    throw new Error(registryDiagnostic(context, result, "stop", error));
+  }
+}
+
 async function published(pkg, run, signal) {
   const spec = `${pkg.manifest.name}@${pkg.manifest.version}`;
-  const result = await run(npm, ["view", spec, "version", "--json", ...registryFlags(pkg.manifest)], {
-    cwd: pkg.dir,
-    signal,
-    timeout: 15_000,
-  });
-  if (result.code === 0 && JSON.parse(result.stdout) === pkg.manifest.version) return true;
-  if (result.code !== 0 && npmError(result) === "E404") return false;
-  throw new Error(`Could not establish registry state for ${spec}.`);
+  const context = { spec, stage: "query version", attempt: "1/1" };
+  const result = await registryRequest(
+    context,
+    run,
+    ["view", spec, "version", "--json", ...registryFlags(pkg.manifest)],
+    {
+      cwd: pkg.dir,
+      signal,
+      timeout: 15_000,
+    },
+  );
+  if (result.code === 0 && registryResponse(context, result, () => JSON.parse(result.stdout)) === pkg.manifest.version)
+    return true;
+  if (result.code !== 0 && npmError(result) === "E404") {
+    console.error(registryDiagnostic(context, result, "version absent; continue with publication"));
+    return false;
+  }
+  throw new Error(`Could not establish registry state for ${spec}.\n${registryDiagnostic(context, result, "stop")}`);
 }
 
 async function available(pkg, expectedIntegrity, downloadDir, { run, signal, wait }) {
   const spec = `${pkg.manifest.name}@${pkg.manifest.version}`;
+  let lastDiagnostic;
   for (let attempt = 0; attempt < 6; attempt++) {
-    signal?.throwIfAborted();
+    const context = { spec, stage: "download tarball", attempt: `${attempt + 1}/6` };
+    registryResponse(context, undefined, () => signal?.throwIfAborted());
     // A cached tarball is not evidence of current registry visibility.
     const cache = mkdtempSync(path.join(downloadDir, "cache-"));
     let target = spec;
     let result;
     if (pkg.manifest.name !== kitName) {
       if (!expectedIntegrity) throw new Error("A release artifact hash is required for registry tarball retrieval.");
-      const metadata = await run(
-        npm,
+      context.stage = "query tarball URL";
+      const metadata = await registryRequest(
+        context,
+        run,
         ["view", spec, "dist.tarball", "--json", "--cache", cache, ...registryFlags(pkg.manifest)],
         { cwd: pkg.dir, signal, timeout: 10_000 },
       );
       if (metadata.code !== 0) result = metadata;
       else {
-        target = JSON.parse(metadata.stdout);
-        if (typeof target !== "string") throw new Error(`Invalid registry tarball URL for ${spec}.`);
-        const url = new URL(target);
-        if (!["https:", "http:"].includes(url.protocol) || url.username || url.password)
-          throw new Error(`Invalid registry tarball URL for ${spec}.`);
+        target = registryResponse(context, metadata, () => {
+          const value = JSON.parse(metadata.stdout);
+          if (typeof value !== "string") throw new Error("Invalid registry tarball URL.");
+          const url = new URL(value);
+          if (!["https:", "http:"].includes(url.protocol) || url.username || url.password)
+            throw new Error("Invalid registry tarball URL.");
+          return value;
+        });
       }
     }
     // Published consumer versions are also young. Retrieve only the exact planned
     // tarball URL and verify its hash, without changing dependency age selection.
-    result ??= await run(
-      npm,
+    if (!result) context.stage = "download tarball";
+    result ??= await registryRequest(
+      context,
+      run,
       [
         "pack",
         target,
@@ -206,22 +296,31 @@ async function available(pkg, expectedIntegrity, downloadDir, { run, signal, wai
       { cwd: pkg.dir, signal, timeout: 10_000 },
     );
     if (result.code === 0) {
-      const [packed] = JSON.parse(result.stdout);
-      if (
-        packed?.id !== spec ||
-        typeof packed.filename !== "string" ||
-        path.basename(packed.filename) !== packed.filename
-      )
-        throw new Error(`Unexpected registry artifact for ${spec}.`);
-      const tarball = path.join(downloadDir, packed.filename);
-      if (!lstatSync(tarball).isFile() || (expectedIntegrity && hash(tarball) !== expectedIntegrity))
-        throw new Error(`Registry artifact differs from packed release: ${spec}.`);
+      registryResponse(context, result, () => {
+        const [packed] = JSON.parse(result.stdout);
+        if (
+          packed?.id !== spec ||
+          typeof packed.filename !== "string" ||
+          path.basename(packed.filename) !== packed.filename
+        )
+          throw new Error(`Unexpected registry artifact for ${spec}.`);
+        const tarball = path.join(downloadDir, packed.filename);
+        if (!lstatSync(tarball).isFile() || (expectedIntegrity && hash(tarball) !== expectedIntegrity))
+          throw new Error(`Registry artifact differs from packed release: ${spec}.`);
+      });
       return;
     }
-    if (["E401", "E403", "ENEEDAUTH"].includes(npmError(result))) break;
-    if (attempt < 5) await wait(2_000, undefined, { signal });
+    const stop = ["E401", "E403", "ENEEDAUTH"].includes(npmError(result)) || attempt === 5;
+    lastDiagnostic = registryDiagnostic(context, result, stop ? "stop" : "retry in 2000 ms");
+    console.error(lastDiagnostic);
+    if (stop) break;
+    try {
+      await wait(2_000, undefined, { signal });
+    } catch (error) {
+      throw new Error(registryDiagnostic({ ...context, stage: "retry wait" }, undefined, "stop", error));
+    }
   }
-  throw new Error(`Registry artifact is unavailable: ${spec}. Dependents were not published.`);
+  throw new Error(`Registry artifact is unavailable: ${spec}. Dependents were not published.\n${lastDiagnostic}`);
 }
 
 export async function publishCoordinatedPackages({
