@@ -175,6 +175,8 @@ The protocols do not persist or log the offer, which contains neither the accoun
 Consumers must match its access token and provider metadata against freshly resolved runtime authentication.
 Without a compatible consumer, account activation works unchanged and no credential is requested.
 
+After an explicit session selection is persisted, the extension emits `accounts:selection-committed:v1` with the exact session object, session ID, and provider ID. Consumers can use it to invalidate account-derived state, then await credential readiness before querying the selected account. The notification contains no account name or credential. See [Named Account Protocols v1](https://github.com/narumiruna/pi-extensions/blob/main/docs/api/accounts-v1.md).
+
 Pi extensions run with the user's process privileges; `pi.events` does not isolate installed extensions.
 Install only trusted extensions because any extension can read user files and process memory.
 The protocol reduces accidental credential coupling; it is not a sandbox.

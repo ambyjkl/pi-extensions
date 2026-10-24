@@ -10,7 +10,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { test, vi } from "vitest";
 import { createMockContext, createMockPi } from "../../../test/support.js";
-import { OAUTH_CREDENTIAL_SOURCE_CHANNEL } from "../src/oauth-credential-source.js";
+import { OAUTH_CREDENTIAL_READINESS_CHANNEL, OAUTH_CREDENTIAL_SOURCE_CHANNEL } from "../src/oauth-credential-source.js";
 import { DEFAULT_USAGE_SETTINGS, type UsageSettingsRuntime, type UsageSettingsState } from "../src/settings.js";
 import usageExtension from "../src/usage.js";
 import { showUsageSettings } from "../src/usage-settings-ui.js";
@@ -2297,6 +2297,174 @@ test("statusline follows runtime auth changes and clears for unsupported selecte
   await settle();
   assert.equal(statuses.get("usage"), "openrouter $5.00 left");
   assert.equal(fetches, 5);
+});
+
+test("account selection refreshes current usage without waiting for another turn or model change", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.onTestFinished(() => {
+    globalThis.fetch = originalFetch;
+  });
+  let activeKey = "account-a";
+  let fetches = 0;
+  globalThis.fetch = async () => {
+    fetches += 1;
+    const remaining = activeKey === "account-a" ? 75 : 40;
+    return new Response(
+      JSON.stringify({
+        data: {
+          label: activeKey,
+          limit: 100,
+          limit_remaining: remaining,
+          limit_reset: "monthly",
+          usage: 100 - remaining,
+          usage_daily: 1,
+          usage_weekly: 5,
+          usage_monthly: 25,
+        },
+      }),
+      { status: 200 },
+    );
+  };
+
+  const mock = createMockPi();
+  usageExtension(mock.pi);
+  const sessionManager = { getSessionId: () => "usage-selection-session" };
+  const { ctx, statuses } = createMockContext({
+    model: openRouterModel,
+    sessionManager,
+    modelRegistry: {
+      getProviderAuth: async () => ({ auth: { apiKey: activeKey } }),
+      getAvailable: () => [openRouterModel],
+      getAll: () => [openRouterModel],
+      getProviderAuthStatus: () => ({ configured: true }),
+      getProviderDisplayName: testProviderDisplayName,
+    },
+  });
+
+  await mock.events.get("session_start")?.[0]?.({}, ctx);
+  await settle();
+  assert.equal(statuses.get("usage"), "openrouter $75.00 left");
+  assert.equal(fetches, 1);
+
+  activeKey = "account-b";
+  const channel = "accounts:selection-committed:v1";
+  const sessionId = sessionManager.getSessionId();
+  mock.rawPi.events.emit(channel, { session: sessionManager, sessionId, providerId: "anthropic" });
+  mock.rawPi.events.emit(channel, { session: {}, sessionId, providerId: "openrouter" });
+  await settle();
+  assert.equal(statuses.get("usage"), "openrouter $75.00 left");
+  assert.equal(fetches, 1);
+
+  mock.rawPi.events.emit(channel, { session: sessionManager, sessionId, providerId: "openrouter" });
+  assert.equal(statuses.get("usage"), undefined);
+  await settle();
+  assert.equal(statuses.get("usage"), "openrouter $40.00 left");
+  assert.equal(fetches, 2);
+
+  mock.events.get("session_shutdown")?.[0]?.({}, ctx);
+});
+
+test("account selection waits for Copilot OAuth readiness before refreshing usage", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.onTestFinished(() => {
+    globalThis.fetch = originalFetch;
+  });
+  const model = {
+    id: "gpt-5.4",
+    name: "GPT-5.4",
+    provider: "github-copilot",
+    baseUrl: "https://api.individual.githubcopilot.com",
+  };
+  const sessionManager = { getSessionId: () => "usage-copilot-selection-session" };
+  let activeAccount = "account-a";
+  let holdReadiness = false;
+  let releaseReadiness: (() => void) | undefined;
+  let readinessWaits = 0;
+  let providerAuthReads = 0;
+  const authorizations: Array<string | null> = [];
+  globalThis.fetch = async (_input, init) => {
+    authorizations.push(new Headers(init?.headers).get("Authorization"));
+    return new Response(
+      JSON.stringify({
+        quota_snapshots: {
+          premium_interactions: {
+            entitlement: 300,
+            remaining: activeAccount === "account-a" ? 240 : 180,
+          },
+        },
+      }),
+      { status: 200 },
+    );
+  };
+
+  const mock = createMockPi();
+  mock.rawPi.events.on(OAUTH_CREDENTIAL_READINESS_CHANNEL, (value) => {
+    if (!holdReadiness || !value || typeof value !== "object") return;
+    const request = value as {
+      session: unknown;
+      provider: string;
+      waitUntil: (pending: Promise<unknown>) => void;
+    };
+    if (request.session !== sessionManager || request.provider !== "github-copilot") return;
+    readinessWaits += 1;
+    request.waitUntil(
+      new Promise<void>((resolve) => {
+        releaseReadiness = resolve;
+      }),
+    );
+  });
+  usageExtension(mock.pi, {
+    credentialReader: () => ({
+      type: "oauth",
+      access: `runtime-${activeAccount}`,
+      refresh: `oauth-${activeAccount}`,
+      expires: Date.now() + 60_000,
+      enterpriseUrl: "github.com",
+    }),
+  });
+  const { ctx, statuses } = createMockContext({
+    model,
+    sessionManager,
+    modelRegistry: {
+      getProviderAuth: async () => {
+        providerAuthReads += 1;
+        return {
+          auth: { apiKey: `runtime-${activeAccount}`, baseUrl: model.baseUrl },
+        };
+      },
+      getAvailable: () => [model],
+      getAll: () => [model],
+      getProviderAuthStatus: () => ({ configured: true }),
+      getProviderDisplayName: testProviderDisplayName,
+    },
+  });
+
+  await mock.events.get("session_start")?.[0]?.({}, ctx);
+  await settle();
+  assert.deepEqual(authorizations, ["Bearer oauth-account-a"]);
+  const readsBeforeSwitch = providerAuthReads;
+
+  activeAccount = "account-b";
+  holdReadiness = true;
+  mock.rawPi.events.emit("accounts:selection-committed:v1", {
+    session: sessionManager,
+    sessionId: sessionManager.getSessionId(),
+    providerId: "github-copilot",
+  });
+  assert.equal(statuses.get("usage"), undefined);
+  await settle();
+  assert.equal(readinessWaits, 1);
+  assert.equal(providerAuthReads, readsBeforeSwitch);
+  assert.deepEqual(authorizations, ["Bearer oauth-account-a"]);
+
+  holdReadiness = false;
+  assert.ok(releaseReadiness);
+  releaseReadiness();
+  await settle();
+
+  assert.deepEqual(authorizations, ["Bearer oauth-account-a", "Bearer oauth-account-b"]);
+  assert.match(statuses.get("usage") ?? "", /copilot/iu);
+  mock.events.get("session_shutdown")?.[0]?.({}, ctx);
 });
 
 test("a retired xAI setting cannot disable explicit usage or publish status", async (t) => {

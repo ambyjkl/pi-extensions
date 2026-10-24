@@ -58,6 +58,7 @@ const ALL_PROVIDER_CONCURRENCY = 2;
 const FAILURE_BACKOFF_MS = 30_000;
 const MAX_ACCOUNT_STATES = 32;
 const STATUS_KEY = "usage";
+const ACCOUNTS_SELECTION_COMMITTED_CHANNEL = "accounts:selection-committed:v1";
 
 const REFRESH_CURRENT = "Refresh current usage";
 const VIEW_ANOTHER = "View another configured provider…";
@@ -170,6 +171,7 @@ export default function usageExtension(pi: ExtensionAPI, dependencies: UsageExte
   const nativeQueryControllers = new Set<AbortController>();
   let querySequence = 0;
   let activeCurrentIdentity: string | undefined;
+  let activeContext: ExtensionContext | undefined;
   let sessionActive = false;
   let statusGeneration = 0;
   let sessionGeneration = 0;
@@ -864,6 +866,52 @@ export default function usageExtension(pi: ExtensionAPI, dependencies: UsageExte
       safeSetStatus(ctx, `usage err: ${message.slice(0, 50)}`);
     });
   };
+
+  pi.events.on(ACCOUNTS_SELECTION_COMMITTED_CHANNEL, (value) => {
+    try {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return;
+      const event = value as Record<string, unknown>;
+      const session = event.session;
+      const sessionId = event.sessionId;
+      const providerId = event.providerId;
+      const ctx = activeContext;
+      if (
+        !session ||
+        typeof session !== "object" ||
+        Array.isArray(session) ||
+        typeof sessionId !== "string" ||
+        typeof providerId !== "string" ||
+        !ctx ||
+        !sessionActive ||
+        session !== ctx.sessionManager ||
+        sessionId !== ctx.sessionManager.getSessionId() ||
+        providerId !== ctx.model?.provider
+      )
+        return;
+
+      clearStatus(ctx);
+      const generation = sessionGeneration;
+      queueMicrotask(() => {
+        const current = activeContext;
+        try {
+          if (
+            !sessionActive ||
+            generation !== sessionGeneration ||
+            !current ||
+            current.sessionManager !== session ||
+            current.sessionManager.getSessionId() !== sessionId ||
+            current.model?.provider !== providerId
+          )
+            return;
+        } catch {
+          return;
+        }
+        startStatusRefresh(current, current.model, true);
+      });
+    } catch {
+      // Ignore malformed notifications from the shared extension event bus.
+    }
+  });
 
   const runMenuOperation = async <T>(
     ctx: ExtensionCommandContext,
@@ -1708,6 +1756,7 @@ export default function usageExtension(pi: ExtensionAPI, dependencies: UsageExte
     },
   });
   pi.on("session_start", async (_event, ctx) => {
+    activeContext = ctx;
     // Clear old cache state before the API invalidates the old session scope.
     failureBackoff.clear();
     latestQueries.clear();
@@ -1736,21 +1785,25 @@ export default function usageExtension(pi: ExtensionAPI, dependencies: UsageExte
     }
   });
   pi.on("session_tree", (_event, ctx) => {
+    activeContext = ctx;
     usageApi?.observe(ctx);
     startStatusRefresh(ctx, ctx.model, false);
   });
   pi.on("model_select", (event, ctx) => {
+    activeContext = ctx;
     usageApi?.observe(ctx);
     // Cancel read-only native queries, not confirmed legacy reset mutations.
     for (const controller of nativeQueryControllers) controller.abort();
     startStatusRefresh(ctx, event.model, false);
   });
   pi.on("turn_start", (_event, ctx) => {
+    activeContext = ctx;
     usageApi?.observe(ctx);
     startStatusRefresh(ctx, ctx.model, false);
   });
   pi.on("session_shutdown", (_event, ctx) => {
     sessionActive = false;
+    activeContext = undefined;
     sessionGeneration += 1;
     statusGeneration += 1;
     clearStatusTimers();
