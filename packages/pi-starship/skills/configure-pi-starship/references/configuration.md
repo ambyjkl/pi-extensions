@@ -38,7 +38,7 @@ Ctrl+C discards the flow.
 Only the separate user save action, exact-draft review, and confirmation publish the draft through managed History and atomic replacement; closing or session replacement never saves it.
 Saving checks the initial disk snapshot and loaded revision, blocks detected concurrent changes, and warns before explicitly repairing an invalid original.
 Chat content and settings read by the agent go to the selected model provider; the child uses the opening model/thinking selection with Pi authentication, has no shell tool, and does not persist its transcript or change the main conversation.
-The fullscreen view uses Pi's native user/assistant/tool message components, with the editor and a clearly framed live footer preview docked at the bottom.
+The fullscreen view uses Pi's native user/assistant/tool message components. Short gray status and control labels sit on the editor borders; the live preview ends at the terminal bottom, in the saved footer's position.
 It shows recent output with expanded, read-only tool results; review actions expose the complete transcript and exact draft.
 Choose **Continue** to leave a document/transcript review; cancelling the review discards the flow without publishing.
 

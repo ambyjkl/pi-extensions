@@ -174,7 +174,7 @@ test("generated runtime is loadable by Pi's Jiti resource loader", async () => {
         await tui.waitForPending();
         tui.press("ctrl+c");
         await chat;
-        assert.match(chatFrame, /configuration chat/u);
+        assert.match(chatFrame, /─ pi-starship /u);
         assert.equal(skillLoaded, true);
       } finally {
         tui.dispose();

@@ -32,13 +32,53 @@ export function renderSettingsChatPreview(
   if (width <= 0) return [];
   const ruleStyle = (text: string) => theme.fg("border", text);
   const top = new HorizontalRule({
-    label: "Footer preview — not saved",
+    label: "Preview",
     labelAlignment: "left",
     ruleStyle,
-    labelStyle: (text) => theme.fg("muted", text),
+    labelStyle: (text) => theme.fg("dim", text),
   });
   const bottom = new HorizontalRule({ ruleStyle });
   return [top.render(width)[0] ?? "", ...preview, bottom.render(width)[0] ?? ""];
+}
+
+/** Add labels only to the public Editor border hooks; native scroll indicators keep priority. */
+export class SettingsChatEditor extends Editor {
+  constructor(
+    tui: TUI,
+    private readonly chromeTheme: Theme,
+    private readonly labels: () => { top: string; bottom: string },
+  ) {
+    super(tui, {
+      borderColor: (text) => chromeTheme.fg("borderMuted", text),
+      selectList: {
+        selectedPrefix: (text) => chromeTheme.fg("accent", text),
+        selectedText: (text) => chromeTheme.fg("accent", text),
+        description: (text) => chromeTheme.fg("muted", text),
+        scrollInfo: (text) => chromeTheme.fg("dim", text),
+        noMatch: (text) => chromeTheme.fg("warning", text),
+      },
+    });
+  }
+  protected renderTopBorder(width: number, hiddenLineCount: number): string {
+    return hiddenLineCount > 0
+      ? super.renderTopBorder(width, hiddenLineCount)
+      : this.labeledBorder(width, this.labels().top);
+  }
+  protected renderBottomBorder(width: number, hiddenLineCount: number): string {
+    return hiddenLineCount > 0
+      ? super.renderBottomBorder(width, hiddenLineCount)
+      : this.labeledBorder(width, this.labels().bottom);
+  }
+  private labeledBorder(width: number, label: string): string {
+    return (
+      new HorizontalRule({
+        label,
+        labelAlignment: "left",
+        ruleStyle: this.borderColor,
+        labelStyle: (text) => this.chromeTheme.fg("dim", text),
+      }).render(width)[0] ?? ""
+    );
+  }
 }
 
 /** Editor actions win collisions. Escape remains a review fallback for unusable cancel settings. */
@@ -100,15 +140,19 @@ export function createSettingsChatComponent(options: {
   let disposed = false;
   let inPaste = false;
   let pending: Promise<void> | undefined;
-  const editor = new Editor(tui, {
-    borderColor: (text) => theme.fg("borderMuted", text),
-    selectList: {
-      selectedPrefix: (text) => theme.fg("accent", text),
-      selectedText: (text) => theme.fg("accent", text),
-      description: (text) => theme.fg("muted", text),
-      scrollInfo: (text) => theme.fg("dim", text),
-      noMatch: (text) => theme.fg("warning", text),
-    },
+  const editor = new SettingsChatEditor(tui, theme, () => {
+    const status =
+      state.error || agent.state.errorMessage
+        ? "Agent error"
+        : !draft.candidate
+          ? "Invalid"
+          : draft.diagnostics
+            ? "Warnings"
+            : "Valid";
+    return {
+      top: "pi-starship",
+      bottom: `${status} · unsaved · ${pending ? "Working · Cancel stop" : "Cancel review"} · Ctrl+C discard`,
+    };
   });
   editor.setText(state.input);
   const render = () => {
@@ -157,34 +201,29 @@ export function createSettingsChatComponent(options: {
         0,
         input.findIndex((line) => line.includes(CURSOR_MARKER)),
       );
-      const preview = options.preview(width).slice(0, Math.max(1, Math.min(4, Math.floor(rows / 4))));
-      const diagnostics = sanitizeTerminalDocument(
-        state.error || agent.state.errorMessage || draft.diagnostics || "Valid draft. Active file unchanged.",
-      )
+      const preview = options.preview(width);
+      const diagnostics = sanitizeTerminalDocument(state.error || agent.state.errorMessage || draft.diagnostics)
         .split("\n")
+        .filter(Boolean)
         .slice(0, 3);
       // Match Pi's transcript -> editor -> footer hierarchy. The fullscreen overlay
       // covers the parent footer, so the real draft preview is part of this dock.
-      const footer = [
-        ...diagnostics.map((line) => theme.fg("muted", line)),
-        theme.fg("dim", "pi-starship configuration chat · preview only"),
-        theme.fg("muted", pending ? "Agent working · save unavailable" : "Cancel reviews · ctrl+c discards"),
-      ];
-      // Horizontal boundaries preserve the statusline's full responsive render width.
-      // Never show a preview with missing boundaries; optional chrome yields first.
-      const previewFrame = renderSettingsChatPreview(width, preview, theme);
+      const details = diagnostics.map((line) => theme.fg("muted", line));
+      // The terminal edge closes this fullscreen preview, matching the saved footer's position.
+      // Keep the review menu's lower rule, but put nothing below the live footer here.
+      const previewFrame = renderSettingsChatPreview(width, preview, theme).slice(0, -1);
       if (input.length + previewFrame.length > rows) {
         return renderBoundedFrame({
           width,
           maxRows: rows,
           rule: rule.render(width)[0] ?? "",
           title: [],
-          content: [...input, theme.fg("muted", "Footer preview hidden — enlarge the terminal"), ...footer],
+          content: [...input, theme.fg("muted", "Footer preview hidden — enlarge the terminal"), ...details],
           focusedRow: cursor,
           priorityRows: [cursor, input.length],
         });
       }
-      const content = [...input, ...previewFrame, ...footer.slice(0, rows - input.length - previewFrame.length)];
+      const content = [...input, ...details.slice(0, rows - input.length - previewFrame.length), ...previewFrame];
       const available = rows - content.length;
       const history = available > 0 ? transcript.render(width).slice(-available) : [];
       return [...history, ...Array.from({ length: available - history.length }, () => ""), ...content].map((line) =>

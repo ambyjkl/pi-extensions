@@ -113,7 +113,7 @@ function fixture(
       const reviewFrame = tui.render();
       assert.match(reviewFrame.join("\n"), /Save and apply reviewed draft/u);
       const previewRow = reviewFrame.findIndex((line) => line.includes("LIVE FOOTER PREVIEW"));
-      assert.match(reviewFrame[previewRow - 1], /─ Footer preview — not saved/u);
+      assert.match(reviewFrame[previewRow - 1], /─ Preview/u);
       assert.match(reviewFrame[previewRow + 1], /^─+$/u);
       for (let index = 0; index < 3; index++) tui.press("tui.select.down");
       tui.press("tui.select.confirm");

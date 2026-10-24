@@ -7,6 +7,7 @@ import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import {
   CURSOR_MARKER,
+  Editor,
   getKeybindings,
   isKittyProtocolActive,
   KeybindingsManager,
@@ -18,7 +19,12 @@ import {
 import { createTuiHarness } from "@narumitw/pi-tui-kit/testing";
 import { test } from "vitest";
 import { createMockContext } from "../../../test/support.js";
-import { createSettingsChatComponent, settingsChatReviewInput, showSettingsChat } from "../src/settings-chat-ui.js";
+import {
+  createSettingsChatComponent,
+  SettingsChatEditor,
+  settingsChatReviewInput,
+  showSettingsChat,
+} from "../src/settings-chat-ui.js";
 import { createSettingsDraft } from "../src/settings-draft.js";
 import { response, settingsChatCustom, testModel } from "./settings-chat-support.js";
 
@@ -73,9 +79,35 @@ function fixture(
   };
 }
 
+test("editor border labels preserve native hidden-line indicators", () => {
+  class NativeEditor extends Editor {
+    borders(width: number, hidden: number) {
+      return [this.renderTopBorder(width, hidden), this.renderBottomBorder(width, hidden)];
+    }
+  }
+  class LabeledEditor extends SettingsChatEditor {
+    borders(width: number, hidden: number) {
+      return [this.renderTopBorder(width, hidden), this.renderBottomBorder(width, hidden)];
+    }
+  }
+  const tui = { requestRender() {} } as ConstructorParameters<typeof Editor>[0];
+  const theme = { fg: (_role: string, value: string) => value } as ConstructorParameters<typeof SettingsChatEditor>[1];
+  const plain = (value: string) => value;
+  const native = new NativeEditor(tui, {
+    borderColor: plain,
+    selectList: { selectedPrefix: plain, selectedText: plain, description: plain, scrollInfo: plain, noMatch: plain },
+  });
+  const labeled = new LabeledEditor(tui, theme, () => ({ top: "pi-starship", bottom: "Valid · unsaved" }));
+  for (const width of [0, 1, 5, 80]) {
+    for (const hidden of [1, 12, 100]) assert.deepEqual(labeled.borders(width, hidden), native.borders(width, hidden));
+    assert.ok(labeled.borders(width, 0).every((line) => visibleWidth(line) <= width));
+  }
+});
+
 test("fullscreen dock handles zero dimensions, callback theme changes, and read-only preview", async () => {
   const f = fixture();
   const roles: string[] = [];
+  const dimLabels: string[] = [];
   type Options = Parameters<typeof createSettingsChatComponent>[0];
   const terminal = { rows: 40 };
   let previewLines = ["read-only footer"];
@@ -88,6 +120,7 @@ test("fullscreen dock handles zero dimensions, callback theme changes, and read-
     theme: {
       fg: (role: string, value: string) => {
         roles.push(role);
+        if (role === "dim") dimLabels.push(value);
         return value;
       },
       bold: (value: string) => value,
@@ -107,16 +140,17 @@ test("fullscreen dock handles zero dimensions, callback theme changes, and read-
     assert.deepEqual(component.render(0), []);
     const frame = component.render(80);
     assert.equal(frame.length, 40);
-    assert.equal(frame.filter((line) => /^─+$/u.test(line)).length, 3);
+    assert.equal(frame.filter((line) => /^─+$/u.test(line)).length, 0);
     const previewRow = frame.findIndex((line) => line.includes("read-only footer"));
-    assert.match(frame[previewRow - 1], /^─ Footer preview — not saved ─+$/u);
-    assert.match(frame[previewRow + 1], /^─{80}$/u);
-    assert.ok(frame.findIndex((line) => line.includes("Valid draft")) > previewRow + 1);
+    assert.match(frame[previewRow - 1], /^─ Preview ─+$/u);
+    assert.equal(previewRow, frame.length - 1);
+    assert.match(frame[previewRow - 4], /^─ pi-starship ─+$/u);
+    assert.match(frame[previewRow - 2], /^─ Valid · unsaved · Cancel review · Ctrl\+C discard ─+$/u);
+    assert.ok(dimLabels.some((label) => label.includes("pi-starship")));
+    assert.ok(dimLabels.some((label) => label.includes("Valid · unsaved")));
+    assert.ok(!frame.some((line) => line.includes("Active file unchanged")));
     assert.ok(previewWidths.every((width) => width === 80));
-    assert.match(frame.at(-2) ?? "", /configuration chat/u);
-    assert.ok(
-      roles.includes("border") && roles.includes("borderMuted") && roles.includes("dim") && roles.includes("muted"),
-    );
+    assert.ok(roles.includes("border") && roles.includes("borderMuted") && roles.includes("dim"));
     const calls = roles.length;
     component.invalidate();
     component.render(80);
@@ -125,8 +159,8 @@ test("fullscreen dock handles zero dimensions, callback theme changes, and read-
     previewLines = ["PREVIEW-FIRST", "\x1b[31mPREVIEW-SECOND 中文\x1b[39m"];
     for (const [rows, shown] of [
       [4, 0],
-      [6, 1],
-      [7, 1],
+      [6, 2],
+      [7, 2],
       [8, 2],
       [12, 2],
       [40, 2],
@@ -137,15 +171,24 @@ test("fullscreen dock handles zero dimensions, callback theme changes, and read-
       const start = resized.findIndex((line) => line.includes("PREVIEW-FIRST"));
       if (shown > 0) {
         assert.ok(start >= 0);
-        assert.match(resized[start - 1], /^─ Footer preview — not saved ─+$/u);
-        if (shown === 2) assert.equal(resized[start + 1], previewLines[1]);
-        assert.match(resized[start + shown], /^─{80}$/u);
+        assert.match(resized[start - 1], /^─ Preview ─+$/u);
+        assert.equal(resized[start + 1], previewLines[1]);
+        assert.equal(start + shown, resized.length);
       } else {
         assert.equal(start, -1);
         assert.ok(!resized.some((line) => line.includes("PREVIEW-SECOND")));
       }
       assert.ok(resized.some((line) => line.includes(CURSOR_MARKER)));
     }
+    terminal.rows = 40;
+    previewLines = ["ONE", "TWO", "THREE", "FOUR", "FIVE"];
+    assert.deepEqual(component.render(80).slice(-5), previewLines);
+    f.state.error = "Provider error\x1b]52;c;secret\x07";
+    const failed = component.render(80);
+    assert.match(failed.join("\n"), /─ Agent error · unsaved/u);
+    assert.ok(failed.includes("Provider error"));
+    assert.deepEqual(failed.slice(-5), previewLines);
+    assert.ok(!failed.join("\n").includes("\x1b]52"));
     terminal.rows = 0;
     assert.deepEqual(component.render(80), []);
   } finally {
@@ -251,7 +294,7 @@ for (const exit of ["escape", "hard cancel", "disposal", "owner abort"] as const
       f.tui.type("Wait");
       f.tui.send("\r");
       await started;
-      assert.match(f.tui.render().join("\n"), /save unavailable/u);
+      assert.match(f.tui.render().join("\n"), /Working/u);
       if (exit === "escape") {
         f.tui.send("\x1b");
         await f.tui.waitForPending();

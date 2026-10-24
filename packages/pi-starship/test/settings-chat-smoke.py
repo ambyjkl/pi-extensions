@@ -84,7 +84,7 @@ def run(action, mode):
             send(b"/starship\r")
             wait_for("Configure with agent")
             send(b"\x1b[B" * 7 + b"\r")
-            wait_for("configuration chat")
+            wait_for("─ pi-starship ")
             send(b"first\r")
             wait_for("SMOKE_FIRST_READY")
             assert active.read_text() == original

@@ -132,8 +132,9 @@ Editor actions win conflicting cancel bindings, and Escape remains a review fall
 Ctrl+C discards the entire flow, including when cancellation is remapped.
 The fullscreen chat reuses Pi's native user, assistant, and tool message components, including Markdown, user-message backgrounds, and message spacing.
 The editor and footer preview stay at the bottom while the transcript grows above them.
-A labeled upper rule and a lower rule enclose the full-width statusline preview; diagnostics and key hints stay outside.
-At short heights, optional text yields first; if both preview boundaries cannot fit, the preview is hidden instead of shown without its frame.
+Short gray labels on the editor borders show draft status and controls.
+The full-width preview sits below a **Preview** rule, with its last line at the terminal bottom, matching the saved footer's position.
+At short heights, error details yield first; if the whole preview cannot fit beside the editor, it is hidden rather than clipped.
 The view shows recent output with expanded, read-only tool results; use the full conversation review for earlier or long responses.
 Choose **Continue** in a document or transcript review; cancelling that review discards the flow without saving.
 
