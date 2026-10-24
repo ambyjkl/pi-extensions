@@ -95,6 +95,8 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
   let chatCleanup: (() => Promise<void>) | undefined;
   let sessionOwner: ExtensionContext["sessionManager"] | undefined;
   let activeTarget: RefreshTarget | undefined;
+  let footerContext: ExtensionContext | undefined;
+  let disposeFooter: (() => void) | undefined;
   let eventDebounceTimer: ReturnType<typeof setTimeout> | undefined;
   let githubPrRefreshTimer: ReturnType<typeof setInterval> | undefined;
   let githubPrExpiryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -166,11 +168,7 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
     clearTimeout(eventDebounceTimer);
     eventDebounceTimer = undefined;
   };
-  const isActiveTarget = (target: RefreshTarget) =>
-    activeTarget?.cwd === target.cwd &&
-    activeTarget.generation === target.generation &&
-    activeTarget.sessionManager === target.sessionManager &&
-    target.generation === sessionGeneration;
+  const isActiveTarget = (target: RefreshTarget) => activeTarget === target && target.generation === sessionGeneration;
 
   const requestRefresh = (target: RefreshTarget, reason: WorkspaceRefreshInput["reason"] = "event") => {
     if (!loaded || !isActiveTarget(target)) return;
@@ -253,14 +251,13 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
     githubPrExpiryTimer.unref?.();
   }
 
-  const installFooter = (ctx: ExtensionContext) => {
-    const generation = ++sessionGeneration;
-    commandInFlight = undefined;
-    sessionOwner = ctx.sessionManager;
-    previewLoaded = undefined;
-    menuController.abort(new DOMException("Starship session context replaced", "AbortError"));
-    menuController = new AbortController();
-    const target: RefreshTarget = { cwd: ctx.cwd, generation, sessionManager: ctx.sessionManager };
+  const releaseFooter = () => {
+    const context = footerContext;
+    footerContext = undefined;
+    const dispose = disposeFooter;
+    disposeFooter = undefined;
+    dispose?.();
+    activeTarget = undefined;
     clearDebounce();
     gitController.stop();
     workspaceController.stop();
@@ -271,11 +268,25 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
     runtime.renderPreview = undefined;
     runtime.inspect = undefined;
     runtime.footerWidth = undefined;
-    activeTarget = ctx.mode === "tui" ? target : undefined;
-    ctx.ui.setStatus("starship", undefined);
-    if (!activeTarget || !loaded) return;
-    gitController.start(generation);
-    workspaceController.start(generation);
+    context?.ui.setFooter(undefined);
+  };
+
+  const syncFooter = (ctx: ExtensionContext) => {
+    const current = previewLoaded ?? loaded;
+    if (ctx.mode !== "tui" || !current || isNativeFooter(current)) {
+      releaseFooter();
+      return;
+    }
+    if (activeTarget) return;
+    const target: RefreshTarget = {
+      cwd: ctx.cwd,
+      generation: sessionGeneration,
+      sessionManager: ctx.sessionManager,
+    };
+    activeTarget = target;
+    footerContext = ctx;
+    gitController.start(target.generation);
+    workspaceController.start(target.generation);
     startGithubPr(target);
 
     ctx.ui.setFooter((tui, theme, footerData) => {
@@ -343,26 +354,28 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
       }, REFRESH_INTERVAL_MS);
       let disposed = false;
 
+      const dispose = () => {
+        if (disposed) return;
+        disposed = true;
+        unsubscribe();
+        clearInterval(timer);
+        if (isActiveTarget(target)) {
+          activeTarget = undefined;
+          clearDebounce();
+          gitController.stop();
+          workspaceController.stop();
+          stopGithubPr();
+          runtime.git = undefined;
+          runtime.workspace = undefined;
+          runtime.requestRender = undefined;
+          runtime.renderPreview = undefined;
+          runtime.inspect = undefined;
+          runtime.footerWidth = undefined;
+        }
+      };
+      disposeFooter = dispose;
       return {
-        dispose() {
-          if (disposed) return;
-          disposed = true;
-          unsubscribe();
-          clearInterval(timer);
-          if (isActiveTarget(target)) {
-            activeTarget = undefined;
-            clearDebounce();
-            gitController.stop();
-            workspaceController.stop();
-            stopGithubPr();
-            runtime.git = undefined;
-            runtime.workspace = undefined;
-            runtime.requestRender = undefined;
-            runtime.renderPreview = undefined;
-            runtime.inspect = undefined;
-            runtime.footerWidth = undefined;
-          }
-        },
+        dispose,
         invalidate() {},
         render(width: number): string[] {
           runtime.footerWidth = width;
@@ -380,6 +393,18 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
     });
     requestRefresh(target, "initial");
     requestGithubPr(target);
+  };
+
+  const installFooter = (ctx: ExtensionContext) => {
+    releaseFooter();
+    sessionGeneration += 1;
+    commandInFlight = undefined;
+    sessionOwner = ctx.sessionManager;
+    previewLoaded = undefined;
+    menuController.abort(new DOMException("Starship session context replaced", "AbortError"));
+    menuController = new AbortController();
+    ctx.ui.setStatus("starship", undefined);
+    syncFooter(ctx);
   };
 
   const configPath = settingsFilePath(getAgentDir());
@@ -411,8 +436,10 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
       previewLoaded = undefined;
       loaded = next;
       loadedRevision += 1;
+      const previousTarget = activeTarget;
+      syncFooter(ctx);
       const target = activeTarget;
-      if (target) {
+      if (target && target === previousTarget) {
         restartLocalControllers(target);
         startGithubPr(target);
         requestRefresh(target);
@@ -423,10 +450,31 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
     preview(next, ctx) {
       if (sessionOwner !== ctx.sessionManager) return;
       previewLoaded = next;
+      syncFooter(ctx);
       refresh();
     },
-    renderPreview(preview, width) {
-      return runtime.renderPreview?.(preview, width) ?? ["Live preview is unavailable until the footer is ready."];
+    renderPreview(preview, width, ctx) {
+      if (isNativeFooter(preview)) return ["Pi built-in footer"];
+      if (runtime.renderPreview) return runtime.renderPreview(preview, width);
+      // Native mode has no custom footer provider. Render the candidate with
+      // session data only; collectors start when a custom footer is installed.
+      return wrapFormattedStatusline(
+        renderStatusline(
+          preview.config,
+          runtimeSnapshot(
+            ctx,
+            {
+              getGitBranch: () => null,
+              getExtensionStatuses: () => new Map(),
+            },
+            runtime,
+          ),
+          width,
+          getCapabilities().trueColor,
+          ctx.ui.theme.colors,
+        ).ansi,
+        width,
+      );
     },
   };
   pi.registerCommand("starship", {
@@ -477,13 +525,7 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
     previewLoaded = undefined;
     sessionGeneration += 1;
     menuController.abort(new DOMException("Starship session shut down", "AbortError"));
-    activeTarget = undefined;
-    clearDebounce();
-    gitController.stop();
-    workspaceController.stop();
-    stopGithubPr();
-    runtime.git = undefined;
-    runtime.workspace = undefined;
+    releaseFooter();
     runtime.activeTools.clear();
     runtime.isStreaming = false;
     runtime.uiPrompt = undefined;
@@ -492,7 +534,6 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
     runtime.renderPreview = undefined;
     runtime.inspect = undefined;
     runtime.footerWidth = undefined;
-    ctx.ui.setFooter(undefined);
     ctx.ui.setStatus("starship", undefined);
     const cleanup = chatCleanup;
     chatCleanup = undefined;
@@ -545,6 +586,10 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
     scheduleRefresh(ctx);
     refresh();
   });
+}
+
+function isNativeFooter(loaded: LoadedStarshipConfig): boolean {
+  return loaded.rawDocument === undefined && loaded.diagnostics.length === 0;
 }
 
 function workspaceInput(
@@ -639,7 +684,7 @@ function safeUsername(): string {
 
 function runtimeSnapshot(
   ctx: ExtensionContext,
-  footerData: ReadonlyFooterDataProvider,
+  footerData: Pick<ReadonlyFooterDataProvider, "getGitBranch" | "getExtensionStatuses">,
   runtime: RuntimeState,
 ): StarshipRuntimeSnapshot {
   return {

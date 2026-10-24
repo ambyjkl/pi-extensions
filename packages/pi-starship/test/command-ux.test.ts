@@ -11,14 +11,14 @@ import { registerStarshipCommand } from "../src/commands.js";
 import { BUILT_IN_EXAMPLE, type LoadedStarshipConfig, loadStarshipConfig } from "../src/config.js";
 import { STARSHIP_PRESETS } from "../src/presets/catalog.js";
 
-test("/starship distinguishes built-in defaults, saved built-in, custom, and fallback states", async () => {
+test("/starship distinguishes Pi native footer, saved Starship built-in, custom, and fallback states", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-starship-command-state-"));
   try {
     const cases = [
       {
         name: "missing",
         path: join(root, "missing.toml"),
-        expected: /Built-in defaults · Healthy/u,
+        expected: /Pi native footer · Healthy/u,
       },
       {
         name: "saved built-in",
@@ -519,7 +519,7 @@ test("healthy missing settings disable restore without creating a document", asy
     for (let index = 0; index < 4; index += 1) tui.press("tui.select.down");
     tui.press("tui.select.confirm");
     await tui.waitForOpen();
-    assert.match(tui.render().join("\n"), /Already using defaults · no file to replace/u);
+    assert.match(tui.render().join("\n"), /Already using Pi native footer · no file to remove/u);
     assert.equal(confirmations, 0);
     assert.equal(existsSync(path), false);
     tui.press("ctrl+c");

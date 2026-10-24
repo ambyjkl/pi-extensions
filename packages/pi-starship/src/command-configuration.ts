@@ -49,7 +49,7 @@ export function configurationPresentation(loaded: LoadedStarshipConfig): Configu
   const fallback = loaded.source === "built-in" && loaded.diagnostics.length > 0;
   return {
     state: healthyMissing
-      ? "Built-in defaults"
+      ? "Pi native footer"
       : savedBuiltIn
         ? "Saved built-in configuration"
         : activePreset
@@ -65,14 +65,10 @@ export function configurationPresentation(loaded: LoadedStarshipConfig): Configu
           ? "User file"
           : "Built-in fallback",
     health: configurationHealth(loaded),
-    restoreDisabled: healthyMissing || savedBuiltIn,
+    restoreDisabled: healthyMissing,
     restoreDescription: healthyMissing
-      ? "Already using defaults · no file to replace"
-      : savedBuiltIn
-        ? "Built-in configuration already saved"
-        : fallback
-          ? "Preview before replacing invalid settings"
-          : "Preview before replacing the document",
+      ? "Already using Pi native footer · no file to remove"
+      : "Preview before restoring Pi native footer",
   };
 }
 
@@ -160,7 +156,7 @@ export async function reloadConfiguration(
   const confirmed = await ctx.ui.confirm(
     "Apply configuration from disk?",
     candidate.loaded.rawDocument === undefined
-      ? "Use built-in defaults for this session? No settings file will be created."
+      ? "Show Pi's native footer for this session? No settings file will be created."
       : "Apply the validated settings document to this session without changing its bytes? The previous loaded document will be kept in History.",
     { signal: owner.signal },
   );
@@ -265,7 +261,7 @@ function reloadPreviewBody(
     `Source: ${presentation.source}`,
     `Path: ${sanitizeTerminalText(options.settingsPath)}`,
     loaded.rawDocument === undefined
-      ? "Applying uses built-in defaults and creates no settings file."
+      ? "Applying shows Pi's native footer and creates no settings file."
       : "Applying changes only the active session; the settings document bytes stay unchanged.",
     ...diagnosticLines(loaded, true),
     "",

@@ -115,6 +115,11 @@ export function settingsFilePath(agentDir: string): string {
   return join(agentDir, CONFIG_FILE_NAME);
 }
 
+/** No active Starship document: Pi owns the footer. Module defaults remain available for new drafts. */
+export function nativeFooterConfig(settingsPath: string): LoadedStarshipConfig {
+  return { config: cloneBuiltInConfig(), source: "built-in", settingsPath, diagnostics: [] };
+}
+
 export function loadStarshipConfig(settingsPath: string): LoadedStarshipConfig {
   let rawDocument: string;
   let snapshot: ConfigDocumentSnapshot;
@@ -125,12 +130,7 @@ export function loadStarshipConfig(settingsPath: string): LoadedStarshipConfig {
     rawDocument = rawBytes.toString("utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT" && !existsSync(settingsPath)) {
-      return {
-        config: cloneBuiltInConfig(),
-        source: "built-in",
-        settingsPath,
-        diagnostics: [],
-      };
+      return nativeFooterConfig(settingsPath);
     }
     return {
       config: cloneBuiltInConfig(),

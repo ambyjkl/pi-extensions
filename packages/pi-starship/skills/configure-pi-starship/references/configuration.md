@@ -10,8 +10,9 @@ The only configuration source is:
 <getAgentDir()>/pi-starship.toml
 ```
 
-When this file is absent, the extension uses its palette-free default without creating the file or its parent directory.
-The built-in root is the explicit sequence `$brand$model$thinking$directory` `$git_branch$git_status$activity$context$time`; it does not start the opt-in GitHub PR query.
+When this file is absent, the extension uses Pi's native footer without creating the file or its parent directory.
+The built-in Starship example remains an editing seed; saving it enables a Starship footer, not Pi's native footer.
+Its root is the explicit sequence `$brand$model$thinking$directory` `$git_branch$git_status$activity$context$time`; it does not start the opt-in GitHub PR query.
 The first successful settings save creates the file atomically.
 Existing malformed documents are never overwritten.
 
@@ -69,13 +70,15 @@ The focused action remains visible at small terminal heights; enlarge an extreme
 Gist actions use `gh` authentication for github.com and transfer only `pi-starship.toml`, limited to 64 KiB; sharing includes comments and unknown fields and requires review and confirmation before creating an unlisted Gist.
 Unlisted Gists are readable by anyone with the link; remove sensitive data before sharing, and check GitHub before retrying a cancelled or failed upload because a remote Gist may already exist.
 Import accepts a Gist ID or URL, validates the complete document, requires raw TOML review, footer preview, and full-replacement confirmation, and preserves the previous document before applying; review untrusted settings for command execution and network access before accepting.
-A missing file is **Built-in defaults**, an exact bundled document uses its preset name, and read or parse errors are **Built-in fallback**.
+A missing file uses Pi's native footer, an exact bundled document uses its preset name, and read or parse errors are **Built-in fallback**.
 Reload from disk reads only after the explicit action, validates and previews the current external state from the existing runtime snapshot, and asks for separate confirmation before changing the active session.
-A deleted document is a valid previewable transition to built-in defaults and creates no file.
+A deleted document is a valid previewable transition to Pi's native footer and creates no file.
 An unchanged document is a no-op, while read or parse failure, cancellation, disposal, external changes after preview, session replacement, shutdown, or runtime apply failure preserves the prior effective footer and every file byte.
 Reload re-reads immediately after confirmation and rejects a different external snapshot; it does not claim cross-process locking or continuing synchronization with later edits.
-Restore is disabled when no settings document exists or the exact built-in document is already saved.
-For a custom or invalid document, Restore previews the result and warns that the complete document, including custom settings, unknown fields, and comments, will be replaced before asking for confirmation. The previous bytes are preserved first, including invalid content on an explicit recovery path.
+**Restore built-in…** remains in the main menu and is disabled only when no settings document exists.
+A saved built-in Starship example is not Pi's native footer and can be restored.
+Restore previews Pi's native footer and asks for confirmation before archiving the exact document bytes in History and removing the active settings document, including custom settings, unknown fields, and comments.
+Invalid content is preserved through the explicit recovery path.
 
 ### Named profiles
 
@@ -405,7 +408,7 @@ See [Git status behavior](modules.md#git-display-controls-and-status-templates) 
 
 | Failure | Result |
 | --- | --- |
-| Missing file | Use built-in defaults without creating a file or directory. |
+| Missing file | Use Pi's native footer without creating a file or directory. |
 | Read failure | Use built-in defaults and report an error diagnostic. |
 | TOML syntax failure | Preserve the raw document, use built-in defaults, and report an error diagnostic. |
 | Unknown root, module, option, or display field | Warn, ignore that field, and keep processing the document. |
@@ -631,6 +634,6 @@ Choose one migration:
 
 1. Replace old aliases with direct styles such as `cyan bold`, `bold bright-yellow`, or `fg:#e3e5e5 bg:#769ff0`.
 2. Define every needed alias under your own `[palettes.<name>]` table and explicitly select it with `palette = "<name>"`.
-3. Use **Restore built-in…** from `/starship` to review and replace the complete document with the new plain nine-module configuration.
+3. Use **Restore built-in…** from `/starship` to archive the complete document in History, remove the active settings file, and return to Pi's native footer.
 
 There is no hidden compatibility overlay or automatic migration.

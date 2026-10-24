@@ -53,7 +53,7 @@ test("Configuration summary covers every source and health class without creatin
   const defaults = loadStarshipConfig(path);
   try {
     const cases = [
-      { loaded: defaults, state: "Built-in defaults", source: "No settings file", health: "Healthy" },
+      { loaded: defaults, state: "Pi native footer", source: "No settings file", health: "Healthy" },
       {
         loaded: { ...defaults, source: "user" as const, rawDocument: BUILT_IN_EXAMPLE },
         state: "Saved built-in configuration",

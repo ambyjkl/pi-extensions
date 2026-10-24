@@ -10,6 +10,7 @@ import { createMockContext, createMockPi } from "../../../test/support.js";
 import { registerStarshipCommand } from "../src/commands.js";
 import { BUILT_IN_EXAMPLE, loadStarshipConfig, settingsFilePath } from "../src/config.js";
 import piStarshipRuntime from "../src/pi-starship.js";
+import { listHistory } from "../src/profile-store.js";
 
 initTheme("dark", false);
 
@@ -93,16 +94,7 @@ test("Configuration browsing does not start collection work", async () => {
     const tui = createTuiHarness({ width: 60, rows: 18 });
     const context = createMockContext({ mode: "tui", hasUI: true, custom: tui.custom });
     await emit(mock.events, "session_start", {}, context.ctx);
-    const footer = (context.footer as FooterFactory)(
-      { requestRender() {} },
-      {},
-      {
-        getGitBranch: () => null,
-        getExtensionStatuses: () => new Map(),
-        onBranchChange: () => () => undefined,
-      },
-    );
-    footer.render(60);
+    assert.equal(context.footer, undefined);
     await flushAsyncWork();
     const callsBeforeMenu = execCalls;
 
@@ -117,7 +109,7 @@ test("Configuration browsing does not start collection work", async () => {
     assert.equal(existsSync(settingsFilePath(root)), false);
     tui.press("ctrl+c");
     await running;
-    footer.dispose();
+    assert.equal(context.footer, undefined);
     await emit(mock.events, "session_shutdown", {}, context.ctx);
   } finally {
     if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
@@ -151,7 +143,9 @@ test("settings opens the raw TOML in TUI, saves atomically, and applies immediat
       confirm: async () => true,
     });
     await emit(mock.events, "session_start", {}, context.ctx);
-    const footer = (context.footer as FooterFactory)(
+    assert.equal(context.footer, undefined);
+    await mock.commands.get("starship")?.handler("settings", context.ctx);
+    const footer = (context.footer as unknown as FooterFactory)(
       { requestRender() {} },
       {},
       {
@@ -160,7 +154,6 @@ test("settings opens the raw TOML in TUI, saves atomically, and applies immediat
         onBranchChange: () => () => undefined,
       },
     );
-    await mock.commands.get("starship")?.handler("settings", context.ctx);
     assert.equal(initial, BUILT_IN_EXAMPLE);
     assert.match(preview, /preview/iu);
     assert.match(preview, /saved/u);
@@ -636,12 +629,12 @@ test("main and Configuration menus expose current state and a clear Back path", 
   await mock.commands.get("starship")?.handler("", context.ctx);
   assert.equal(call, 3);
   assert.match(screens[1] ?? "", /Configuration/u);
-  assert.match(screens[1] ?? "", /State: Built-in defaults/u);
+  assert.match(screens[1] ?? "", /State: Pi native footer/u);
   assert.match(screens[1] ?? "", /Source: No settings file/u);
   assert.match(screens[2] ?? "", /Configure with agent/u);
 });
 
-test("Restore previews, confirms, and atomically applies the built-in footer", async () => {
+test("Restore archives exact settings bytes, removes the document, and applies Pi native footer", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-starship-command-"));
   const path = settingsFilePath(root);
   writeFileSync(path, "format = 'custom'\nfuture = true\n");
@@ -682,12 +675,19 @@ test("Restore previews, confirms, and atomically applies the built-in footer", a
     assert.match(restorePreview, /entire settings document/iu);
     assert.match(restorePreview, /unknown fields/iu);
     assert.match(restorePreview, /previous document.*History/isu);
-    assert.match(restorePreview, /\$brand\$model/u);
-    assert.match(confirmation, /All custom settings, unknown fields, and comments will be replaced/u);
-    assert.match(confirmation, /previous document will be kept in History/u);
+    assert.match(restorePreview, /Pi native footer/u);
+    assert.doesNotMatch(restorePreview, /\$brand\$model/u);
+    assert.match(confirmation, /Remove/u);
+    assert.match(confirmation, /exact previous document.*will be kept in History/u);
     assert.doesNotMatch(restorePreview, /░▒▓|/u);
     assert.equal(applied, 1);
-    assert.equal(readFileSync(path, "utf8"), BUILT_IN_EXAMPLE);
+    assert.equal(existsSync(path), false);
+    assert.equal(loaded.rawDocument, undefined);
+    assert.equal(loaded.source, "built-in");
+    assert.deepEqual(
+      listHistory(path).map((item) => item.rawBytes),
+      [Buffer.from("format = 'custom'\nfuture = true\n")],
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -722,12 +722,83 @@ test("Restore recovers a malformed settings document", async () => {
     });
     await mock.commands.get("starship")?.handler("", context.ctx);
     assert.equal(applied, 1);
-    assert.equal(readFileSync(path, "utf8"), BUILT_IN_EXAMPLE);
-    assert.equal(loaded.source, "user");
+    assert.equal(existsSync(path), false);
+    assert.equal(loaded.source, "built-in");
+    assert.equal(loaded.rawDocument, undefined);
+    assert.deepEqual(
+      listHistory(path).map((item) => item.rawBytes),
+      [Buffer.from("format = [\n")],
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+for (const scenario of ["saved example", "apply failure", "concurrent rollback", "concurrent confirmation"] as const) {
+  test(`Restore Pi native footer handles ${scenario}`, async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-starship-native-restore-"));
+    const path = settingsFilePath(root);
+    const original = scenario === "saved example" ? BUILT_IN_EXAMPLE : "# exact original\r\nformat = 'custom'\r\n";
+    const concurrent = "format = 'external'\n";
+    writeFileSync(path, original);
+    try {
+      const mock = createMockPi();
+      const initial = loadStarshipConfig(path);
+      let loaded = initial;
+      let applies = 0;
+      let nativeCandidate = false;
+      registerStarshipCommand(mock.pi, {
+        settingsPath: path,
+        getLoaded: () => loaded,
+        apply(next) {
+          applies += 1;
+          if (next.rawDocument === undefined) {
+            nativeCandidate = true;
+            assert.equal(existsSync(path), false);
+            if (scenario === "concurrent rollback") writeFileSync(path, concurrent);
+            if (scenario === "apply failure" || scenario === "concurrent rollback") throw new Error("apply failed");
+          }
+          loaded = next;
+        },
+      });
+      let calls = 0;
+      const context = createMockContext({
+        mode: "tui",
+        hasUI: true,
+        custom: async (factory: unknown) => {
+          const inputs =
+            calls === 0 ? ["\u001b[B", "\u001b[B", "\u001b[B", "\u001b[B", "\r"] : calls === 1 ? ["\r"] : ["\u001b"];
+          calls += 1;
+          return (await driveTuiCustom(factory, inputs, 80)).result;
+        },
+        confirm: async () => {
+          if (scenario === "concurrent confirmation") writeFileSync(path, concurrent);
+          return true;
+        },
+      });
+      await mock.commands.get("starship")?.handler("", context.ctx);
+      assert.equal(nativeCandidate, scenario !== "concurrent confirmation");
+      if (scenario === "saved example") {
+        assert.equal(applies, 1);
+        assert.equal(existsSync(path), false);
+        assert.equal(loaded.rawDocument, undefined);
+      } else {
+        assert.equal(readFileSync(path, "utf8"), scenario === "apply failure" ? original : concurrent);
+        assert.equal(loaded.rawDocument, initial.rawDocument);
+        assert.match(context.notifications.at(-1)?.message ?? "", /changed|failed/iu);
+      }
+      const history = listHistory(path);
+      if (scenario === "concurrent confirmation") assert.equal(history.length, 0);
+      else
+        assert.deepEqual(
+          history.map((item) => item.rawBytes),
+          [Buffer.from(original)],
+        );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
 
 test("invalid drafts can return to editing before preview and atomic apply", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-starship-command-"));
