@@ -1,5 +1,18 @@
 # @narumitw/pi-starship
 
+## 0.63.0
+
+### Minor Changes
+
+- 7e6690c: Restore Pi's native footer from Restore built-in… instead of saving the Starship example. Keep the previous settings bytes in History before removing the active file. Missing settings now leave the native footer active, and presets can still be applied without reloading. Native-mode previews use cached data and do not start collectors until custom settings are applied.
+
+### Patch Changes
+
+- 9af45da: Align configuration-chat hints with Pi core: use lowercase key names and “to” action descriptions, and replace the ambiguous cancellation label with “esc to interrupt” when Escape is available.
+- 584d57b: Keep the configuration chat open on idle Escape instead of opening a review menu. Escape still stops an active response, save shortcuts still open exact-draft review, and Ctrl+C still discards the chat.
+- 06c8567: Allow scrolling configuration chat history with the mouse wheel and configured Editor page-up/page-down keys. Keep the history position stable while new output arrives and resume following output at the bottom.
+- 71a7a29: Support collapsing and expanding configuration-chat tool output with Pi’s app.tools.expand action (Ctrl+O by default), without changing the main conversation. Preserve the local display state across new tool output and theme invalidation.
+
 ## 0.62.0
 
 ### Minor Changes
