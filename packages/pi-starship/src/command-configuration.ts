@@ -22,6 +22,8 @@ export interface WorkflowOwner {
   isCurrent(): boolean;
   /** Session ownership independent of command cancellation and candidate/revision guards. */
   isSessionCurrent?(): boolean;
+  /** The shared parent terminal can remain live after its session context changes. */
+  canRestoreTerminal?(): boolean;
 }
 
 export interface ConfigurationCommandOptions {

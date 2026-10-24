@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { createTuiHarness } from "@narumitw/pi-tui-kit/testing";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 import { createMockContext, createMockPi } from "../../../test/support.js";
 import { showSettingsAgentChat } from "../src/command-settings-chat.js";
 import { handleStarshipCommand, registerStarshipCommand, type StarshipCommandOptions } from "../src/commands.js";
@@ -129,7 +129,9 @@ function fixture(
       await tui.waitForPending();
     },
     async chooseSave(continueReview = true) {
+      const previous = tui.openCount;
       tui.send("\x13");
+      await vi.waitFor(() => assert.ok(tui.openCount > previous));
       await tui.waitForOpen();
       assert.match(tui.render().join("\n"), /Review draft before saving/u);
       if (continueReview) tui.press("tui.select.confirm");

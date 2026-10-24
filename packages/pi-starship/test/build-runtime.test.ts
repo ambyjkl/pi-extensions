@@ -9,7 +9,7 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { createTuiHarness } from "@narumitw/pi-tui-kit/testing";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 import { listFiles, registerRuntimeBuilderContract } from "../../../test/runtime-builder-contract.js";
 import { createMockContext } from "../../../test/support.js";
 import { response, settingsChatCustom, testModel } from "./settings-chat-support.js";
@@ -127,8 +127,15 @@ test("generated runtime is loadable by Pi's Jiti resource loader", async () => {
     assert.ok(extension);
     loaded.runtime.getThinkingLevel = () => "off";
     const tui = createTuiHarness({ width: 80, rows: 24 });
-    const context = createMockContext({ mode: "tui", hasUI: true, custom: settingsChatCustom(tui.custom) });
-    const emit = async (name: "session_start" | "session_shutdown") => {
+    let fullscreen: Parameters<NonNullable<Parameters<typeof settingsChatCustom>[2]>>[0] | undefined;
+    const context = createMockContext({
+      mode: "tui",
+      hasUI: true,
+      custom: settingsChatCustom(tui.custom, undefined, (value) => {
+        fullscreen = value;
+      }),
+    });
+    const emit = async (name: "session_start" | "session_shutdown" | "session_tree") => {
       const event = name === "session_start" ? { type: name, reason: "startup" } : { type: name };
       for (const handler of extension.handlers.get(name) ?? []) await handler(event, context.ctx as ExtensionContext);
     };
@@ -194,7 +201,13 @@ test("generated runtime is loadable by Pi's Jiti resource loader", async () => {
               !message.isError &&
               JSON.stringify(message.content).includes("loadedDocumentAvailable"),
           );
-          return response([{ type: "text", text: "Generated chat ready" }]);
+          return response([
+            {
+              type: "text",
+              text:
+                "Generated chat ready\n" + Array.from({ length: 120 }, (_, row) => `generated-row-${row}`).join("\n"),
+            },
+          ]);
         };
         const chat = command.handler("", ctx);
         await tui.waitForOpen();
@@ -204,11 +217,57 @@ test("generated runtime is loadable by Pi's Jiti resource loader", async () => {
         tui.type("Explain the model module");
         tui.send("\r");
         await tui.waitForPending();
+        assert.match(tui.render().join("\n"), /generated-row-119/u);
+        tui.send("\x1b[5~");
+        const paged = tui.render().join("\n");
+        assert.doesNotMatch(paged, /generated-row-119/u);
+        tui.mouse({ type: "wheel", x: 1, y: 1, wheelDelta: -1 });
+        assert.notEqual(tui.render().join("\n"), paged);
         tui.press("ctrl+c");
         await chat;
         assert.match(chatFrame, /─ pi-starship /u);
         assert.equal(skillLoaded, true);
         assert.equal(snapshotRead, true);
+
+        // A tree transition invalidates context but keeps the same physical TUI.
+        const treeChat = command.handler("", ctx);
+        await tui.waitForOpen();
+        tui.press("tui.select.confirm");
+        await tui.waitForOpen();
+        assert.ok(fullscreen);
+        const restart = vi.spyOn(fullscreen.parent, "start");
+        await emit("session_tree");
+        await treeChat;
+        assert.equal(restart.mock.calls.length, 1);
+        restart.mockRestore();
+
+        // The real extension shutdown hook must join the child's terminal drain,
+        // not only the already-idle configuration agent.
+        const secondChat = command.handler("", ctx);
+        await tui.waitForOpen();
+        tui.press("tui.select.confirm");
+        await tui.waitForOpen();
+        assert.ok(fullscreen);
+        let release!: () => void;
+        let draining!: () => void;
+        const drainStarted = new Promise<void>((resolve) => {
+          draining = resolve;
+        });
+        fullscreen.terminal.drain = () =>
+          new Promise<void>((resolve) => {
+            release = resolve;
+            draining();
+          });
+        let stopped = false;
+        const shutdown = emit("session_shutdown").then(() => {
+          stopped = true;
+        });
+        await drainStarted;
+        assert.equal(stopped, false);
+        release();
+        await shutdown;
+        await secondChat;
+        assert.equal(stopped, true);
       } finally {
         tui.dispose();
         await running;

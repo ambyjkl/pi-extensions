@@ -1,3 +1,4 @@
+import { stripVTControlCharacters } from "node:util";
 import type { Agent, AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
@@ -24,6 +25,9 @@ function displayValue<T>(value: T): T {
 export interface SettingsChatAnchor {
   message: AgentMessage | symbol;
   row: number;
+  width: number;
+  offset: number;
+  text: string;
 }
 
 /** Reuse Pi's public message components, not another extension's renderer or private settings. */
@@ -56,7 +60,9 @@ export function createSettingsChatTranscript(agent: Agent, tui: TUI, cwd: string
       if (event.type === "message_end") streamingIdentity = undefined;
     }
   });
-  let spans: Array<{ message: AgentMessage | symbol; start: number; end: number }> = [];
+  let spans: Array<{ message: AgentMessage | symbol; start: number; end: number; offsets: number[]; text: string }> =
+    [];
+  let renderedWidth = 0;
   let streaming: AssistantMessageComponent | undefined;
   let disposed = false;
   let expanded = true;
@@ -75,6 +81,20 @@ export function createSettingsChatTranscript(agent: Agent, tui: TUI, cwd: string
       const activeMessages = new Set<AgentMessage>();
       const activeTools = new Set<string>();
       const lines: string[] = [];
+      renderedWidth = width;
+      const recordSpan = (message: AgentMessage | symbol, start: number) => {
+        let offset = 0;
+        let text = "";
+        const offsets = lines.slice(start).map((line) => {
+          const before = offset;
+          // Display-only offsets ignore padding and wrap-boundary whitespace.
+          const content = stripVTControlCharacters(line).replace(/\s/gu, "");
+          text += content;
+          offset += content.length;
+          return before;
+        });
+        spans.push({ message, start, end: lines.length, offsets, text });
+      };
       const appendAssistant = (message: AssistantMessage, component: AssistantMessageComponent) => {
         lines.push(...component.render(width));
         for (const call of message.content) {
@@ -140,7 +160,7 @@ export function createSettingsChatTranscript(agent: Agent, tui: TUI, cwd: string
           }
           appendAssistant(message, component as AssistantMessageComponent);
         }
-        spans.push({ message: identities.get(message) ?? message, start, end: lines.length });
+        recordSpan(identities.get(message) ?? message, start);
       }
       const partial = agent.state.streamingMessage;
       if (partial?.role === "assistant") {
@@ -149,7 +169,7 @@ export function createSettingsChatTranscript(agent: Agent, tui: TUI, cwd: string
         // Tool calls are rendered after finalization, not from incomplete streaming arguments.
         const start = lines.length;
         lines.push(...streaming.render(width));
-        spans.push({ message: identities.get(partial) ?? partial, start, end: lines.length });
+        recordSpan(identities.get(partial) ?? partial, start);
       } else streaming = undefined;
       for (const message of messages.keys()) if (!activeMessages.has(message)) messages.delete(message);
       for (const id of tools.keys()) if (!activeTools.has(id)) tools.delete(id);
@@ -157,12 +177,46 @@ export function createSettingsChatTranscript(agent: Agent, tui: TUI, cwd: string
     },
     anchorAt(row: number): SettingsChatAnchor | undefined {
       const span = spans.find((item) => row < item.end);
-      return span ? { message: span.message, row: row - span.start } : undefined;
+      return span
+        ? {
+            message: span.message,
+            row: row - span.start,
+            width: renderedWidth,
+            offset: span.offsets[Math.max(0, row - span.start)] ?? 0,
+            text: span.text.slice(
+              span.offsets[Math.max(0, row - span.start)] ?? 0,
+              span.offsets[Math.max(0, row - span.start) + 1],
+            ),
+          }
+        : undefined;
     },
     rowAt(anchor: SettingsChatAnchor): number {
       const span = spans.find((item) => item.message === anchor.message);
       // If the anchored message was evicted, show the oldest retained content.
-      return span ? Math.max(0, span.start + Math.min(anchor.row, span.end - span.start - 1)) : 0;
+      if (!span) return 0;
+      let row = anchor.row;
+      const currentText = span.text.slice(span.offsets[Math.max(0, row)], span.offsets[Math.max(0, row) + 1]);
+      if (anchor.width !== renderedWidth || currentText !== anchor.text) {
+        // Restore retained content after reflow or tool expansion/collapse.
+        // Match the row's content, not the accumulated length of earlier rows:
+        // Markdown rules and other decoration can change width independently.
+        let offset = anchor.offset;
+        if (anchor.text) {
+          let match = span.text.indexOf(anchor.text);
+          let best = -1;
+          while (match >= 0) {
+            if (best < 0 || Math.abs(match - anchor.offset) < Math.abs(best - anchor.offset)) best = match;
+            match = span.text.indexOf(anchor.text, match + 1);
+          }
+          if (best >= 0) offset = best;
+        }
+        row = 0;
+        for (let index = 0; index < span.offsets.length; index++) {
+          if (span.offsets[index] > offset) break;
+          row = index;
+        }
+      }
+      return Math.max(0, span.start + Math.min(row, span.end - span.start - 1));
     },
     toggleTools() {
       if (disposed) return;

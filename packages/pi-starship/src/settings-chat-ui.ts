@@ -7,8 +7,8 @@ import {
   type Theme,
 } from "@earendil-works/pi-coding-agent";
 import {
+  type Component,
   CURSOR_MARKER,
-  decodeKittyPrintable,
   Editor,
   getKeybindings,
   isKeyRelease,
@@ -17,13 +17,15 @@ import {
   parseKey,
   type TUI,
   TUI_KEYBINDINGS,
-  type TuiMouseEvent,
   truncateToWidth,
+  VStack,
 } from "@earendil-works/pi-tui";
-import { HorizontalRule, renderBoundedFrame, runCustomInteraction } from "@narumitw/pi-tui-kit";
+import { HorizontalRule, renderBoundedFrame } from "@narumitw/pi-tui-kit";
 import { sanitizeTerminalDocument } from "@narumitw/pi-tui-kit/terminal-document";
 import type { WorkflowOwner } from "./command-configuration.js";
-import { createSettingsChatTranscript, type SettingsChatAnchor } from "./settings-chat-transcript.js";
+import { runSettingsChatFullscreen } from "./settings-chat-fullscreen.js";
+import { SettingsChatScrollView } from "./settings-chat-scroll.js";
+import { createSettingsChatTranscript } from "./settings-chat-transcript.js";
 import type { SettingsDraft } from "./settings-draft.js";
 
 export type SettingsChatAction = "save" | "discard";
@@ -68,67 +70,13 @@ export interface ChatViewState {
   error: string;
 }
 
-// Installed Editor.handleInput actions before pageUp/pageDown, in native order.
-// No autocomplete provider is installed in this chat. Jump triggers come AFTER paging.
-const BEFORE_PAGE_ACTIONS = [
-  "tui.input.copy",
-  "tui.editor.undo",
-  "tui.input.tab",
-  "tui.editor.deleteToLineEnd",
-  "tui.editor.deleteToLineStart",
-  "tui.editor.deleteWordBackward",
-  "tui.editor.deleteWordForward",
-  "tui.editor.deleteCharBackward",
-  "tui.editor.deleteCharForward",
-  "tui.editor.yank",
-  "tui.editor.yankPop",
-  "tui.editor.historyPrevious",
-  "tui.editor.historyNext",
-  "tui.editor.cursorLineStart",
-  "tui.editor.cursorLineEnd",
-  "tui.editor.cursorWordLeft",
-  "tui.editor.cursorWordRight",
-  "tui.input.newLine",
-  "tui.input.submit",
-  "tui.editor.cursorUp",
-  "tui.editor.cursorDown",
-  "tui.editor.cursorRight",
-  "tui.editor.cursorLeft",
-] as const;
-
-/** Match Editor's printable jump targets without a Jiti-incompatible package subpath. */
-function nativeJumpPrintable(data: string): boolean {
-  if (decodeKittyPrintable(data) !== undefined || data.charCodeAt(0) >= 32) return true;
-  // Editor also accepts plain/Shift modifyOtherKeys text, ignoring Caps/Num Lock bits.
-  if (!data.startsWith("\x1b[27;")) return false;
-  const match = /^(\d+);(\d+)~$/u.exec(data.slice(5));
-  if (!match) return false;
-  const modifier = Number(match[1]) - 1;
-  const codepoint = Number(match[2]);
-  return (modifier & ~(1 | 64 | 128)) === 0 && codepoint >= 32 && codepoint <= 0x10ffff;
-}
-
-function nativeBeforePage(data: string): boolean {
-  return (
-    BEFORE_PAGE_ACTIONS.some((action) => getKeybindings().matches(data, action)) ||
-    matchesKey(data, "shift+backspace") ||
-    matchesKey(data, "shift+delete") ||
-    data.charCodeAt(0) === 10 ||
-    data === "\x1b\r" ||
-    data === "\x1b[13;2~" ||
-    (data.length > 1 && data.includes("\x1b") && data.includes("\r"))
-  );
-}
-
 /** Add labels only to the public Editor border hooks; native scroll indicators keep priority. */
 export class SettingsChatEditor extends CustomEditor {
-  onTranscriptPage?: (direction: -1 | 1) => void;
-  private awaitingJump: string | undefined;
   constructor(
     tui: TUI,
     private readonly chromeTheme: Theme,
     private readonly labels: () => { top: string; bottom: string },
-    private readonly chatKeys: KeybindingsManager,
+    chatKeys: KeybindingsManager,
   ) {
     super(
       tui,
@@ -145,52 +93,8 @@ export class SettingsChatEditor extends CustomEditor {
       chatKeys,
     );
   }
-  handleInput(data: string): void {
-    const kb = getKeybindings();
-    // These CustomEditor branches consume input before reaching Editor, even
-    // without a handler. Explicit history bypasses registered message actions.
-    const interrupt = this.chatKeys.matches(data, "app.interrupt");
-    const appConsumes =
-      this.chatKeys.matches(data, "app.clipboard.pasteImage") ||
-      (interrupt && this.onEscape !== undefined) ||
-      (!interrupt && this.chatKeys.matches(data, "app.exit") && this.getText().length === 0);
-    const history =
-      this.chatKeys.matches(data, "tui.editor.historyPrevious") ||
-      this.chatKeys.matches(data, "tui.editor.historyNext");
-    const registeredAction =
-      !interrupt &&
-      !history &&
-      (this.chatKeys.matches(data, "app.message.followUp") ||
-        this.chatKeys.matches(data, "app.message.dequeue") ||
-        this.chatKeys.matches(data, "app.tools.expand"));
-    if (appConsumes || registeredAction) {
-      super.handleInput(data);
-      return;
-    }
-    const jump = kb.matches(data, "tui.editor.jumpForward") || kb.matches(data, "tui.editor.jumpBackward");
-    const pendingJump = this.awaitingJump;
-    const jumpConsumes = pendingJump !== undefined && (jump || nativeJumpPrintable(data));
-    this.awaitingJump = undefined;
-    const earlier = nativeBeforePage(data);
-    const direction = kb.matches(data, "tui.editor.pageUp")
-      ? -1
-      : kb.matches(data, "tui.editor.pageDown")
-        ? 1
-        : undefined;
-    // The chat registers no interrupt handler. CustomEditor forwards it to
-    // Editor, then returns; retain that branch and its jump-state transition.
-    if (!interrupt && !jumpConsumes && !earlier && direction !== undefined && this.onTranscriptPage) {
-      // Repeating the trigger cancels native jump mode without moving the editor.
-      if (pendingJump !== undefined) Editor.prototype.handleInput.call(this, pendingJump);
-      this.onTranscriptPage(direction);
-      return;
-    }
-    if (!jumpConsumes && !earlier && direction === undefined && jump) this.awaitingJump = data;
-    super.handleInput(data);
-  }
   /** Bypass app shortcuts while the native Editor owns a bracketed paste. */
   handlePasteInput(data: string): void {
-    this.awaitingJump = undefined;
     Editor.prototype.handleInput.call(this, data);
   }
   protected renderTopBorder(width: number, hiddenLineCount: number): string {
@@ -215,7 +119,23 @@ export class SettingsChatEditor extends CustomEditor {
   }
 }
 
-/** Editor actions win collisions. Escape remains a stop fallback for unusable cancel settings. */
+// Native fullscreen actions evaluated before the focused root component. Search
+// navigation/close are conditional on a focused search overlay, not this editor.
+const ROOT_VIEWPORT_ACTIONS = [
+  "tui.altScreen.search",
+  "tui.altScreen.pageUp",
+  "tui.altScreen.pageDown",
+  "tui.altScreen.halfPageUp",
+  "tui.altScreen.halfPageDown",
+  "tui.altScreen.lineUp",
+  "tui.altScreen.lineDown",
+  "tui.altScreen.previousPrompt",
+  "tui.altScreen.nextPrompt",
+  "tui.altScreen.top",
+  "tui.altScreen.bottom",
+] as const;
+
+/** Native viewport/editor actions win collisions; Escape is an executable stop fallback. */
 export function settingsChatStopInput(data: string, keybindings: Pick<KeybindingsManager, "matches">): boolean {
   const editorKeys = getKeybindings();
   const parsed = parseKey(data);
@@ -236,7 +156,8 @@ export function settingsChatStopInput(data: string, keybindings: Pick<Keybinding
     (Object.keys(TUI_KEYBINDINGS) as Array<keyof typeof TUI_KEYBINDINGS>)
       .filter((key) => key.startsWith("tui.editor.") || key.startsWith("tui.input."))
       .some((key) => editorKeys.matches(data, key));
-  return !editing && (keybindings.matches(data, "tui.select.cancel") || matchesKey(data, Key.escape));
+  const viewport = ROOT_VIEWPORT_ACTIONS.some((action) => editorKeys.matches(data, action));
+  return !viewport && !editing && (keybindings.matches(data, "tui.select.cancel") || matchesKey(data, Key.escape));
 }
 
 export function createSettingsChatComponent(options: {
@@ -255,17 +176,6 @@ export function createSettingsChatComponent(options: {
   let inPaste = false;
   let pending: Promise<void> | undefined;
   let stopping = false;
-  // Undefined follows output; message identity keeps retained history stable after eviction.
-  let historyTop: number | undefined;
-  let historyAnchor: SettingsChatAnchor | undefined;
-  let historyRows = 0;
-  let historyMaximum = 0;
-  const scrollHistory = (delta: number) => {
-    const next = Math.max(0, Math.min(historyMaximum, (historyTop ?? historyMaximum) + delta));
-    historyTop = next === historyMaximum ? undefined : next;
-    historyAnchor = historyTop === undefined ? undefined : transcript.anchorAt(historyTop);
-    render();
-  };
   const queued: Array<{ kind: "steer" | "followUp"; message: UserMessage; text: string }> = [];
   const editor = new SettingsChatEditor(
     tui,
@@ -289,7 +199,6 @@ export function createSettingsChatComponent(options: {
     },
     keybindings,
   );
-  editor.onTranscriptPage = (direction) => scrollHistory(direction * Math.max(1, historyRows));
   editor.setText(state.input);
   const render = () => {
     if (!disposed && !signal.aborted) tui.requestRender();
@@ -369,19 +278,12 @@ export function createSettingsChatComponent(options: {
   editor.onAction("app.message.followUp", () => submit(editor.getExpandedText().trim(), "followUp"));
   editor.onAction("app.message.dequeue", restoreQueue);
   editor.onAction("app.tools.expand", () => transcript.toggleTools());
-  return {
-    get focused() {
-      return editor.focused;
-    },
-    set focused(value: boolean) {
-      editor.focused = value;
-    },
+  const dock: Component = {
     render(width: number): string[] {
-      historyRows = 0;
       if (disposed || signal.aborted || width <= 0) return [];
       const rows = Math.max(0, Math.floor(Number.isFinite(tui.terminal.rows) ? tui.terminal.rows : 24));
       if (rows === 0) return [];
-      const input = editor.render(width);
+      const input = editor.render(Math.max(3, width)).map((line) => truncateToWidth(line, width, ""));
       const cursor = Math.max(
         0,
         input.findIndex((line) => line.includes(CURSOR_MARKER)),
@@ -391,8 +293,7 @@ export function createSettingsChatComponent(options: {
         .split("\n")
         .filter(Boolean)
         .slice(0, 3);
-      // Match Pi's transcript -> editor -> footer hierarchy. The fullscreen overlay
-      // covers the parent footer, so the real draft preview is part of this dock.
+      // Keep the draft preview outside the scrollable history.
       const details = diagnostics.map((line) => theme.fg("muted", line));
       // Render the footer without extra rules, matching its saved position at the terminal bottom.
       if (input.length + preview.length > rows) {
@@ -419,22 +320,47 @@ export function createSettingsChatComponent(options: {
           ),
         );
       const content = [...queueLines, ...input, ...detailLines, ...preview];
-      const available = rows - content.length;
-      historyRows = available;
-      // Keep the anchor while the dock temporarily leaves no room for history.
-      if (available === 0) return content.map((line) => truncateToWidth(line, width, ""));
-      const lines = transcript.render(width);
-      historyMaximum = Math.max(0, lines.length - available);
-      if (historyTop !== undefined) {
-        historyTop = Math.min(historyAnchor ? transcript.rowAt(historyAnchor) : historyTop, historyMaximum);
-        if (historyTop === historyMaximum) historyTop = undefined;
-      }
-      const top = historyTop ?? historyMaximum;
-      historyAnchor = historyTop === undefined ? undefined : transcript.anchorAt(top);
-      const history = lines.slice(top, top + available);
-      return [...history, ...Array.from({ length: available - history.length }, () => ""), ...content].map((line) =>
-        truncateToWidth(line, width, ""),
-      );
+      return content.map((line) => truncateToWidth(line, width, ""));
+    },
+    invalidate() {
+      editor.invalidate();
+    },
+  };
+  const history: Component = {
+    render(width) {
+      // Capture against the previous frame's spans before rebuilding identities.
+      scroll.anchor = scroll.isFollowingEnd ? undefined : transcript.anchorAt(scroll.scrollTop);
+      return transcript.render(width);
+    },
+    invalidate() {
+      transcript.invalidate();
+    },
+  };
+  const scroll = new SettingsChatScrollView(history, {
+    primary: true,
+    follow: "end",
+    scrollbar: "auto",
+    scrollbarTrackStyle: (text) => theme.fg("scrollbarTrack", text),
+    scrollbarThumbStyle: (text) => theme.fg("scrollbarThumb", text),
+  });
+  scroll.restoreAnchor = (anchor) => transcript.rowAt(anchor);
+  const layout = new VStack([
+    { component: scroll, basis: 0, grow: 1, minSize: 0 },
+    { component: dock, basis: "auto", shrink: 1, minSize: 1 },
+  ]);
+  return {
+    getFullscreenLayout() {
+      return layout;
+    },
+    get focused() {
+      return editor.focused;
+    },
+    set focused(value: boolean) {
+      editor.focused = value;
+    },
+    render(width: number): string[] {
+      if (disposed || signal.aborted || width <= 0 || tui.terminal.rows <= 0) return [];
+      return layout.render(width);
     },
     invalidate() {
       editor.invalidate();
@@ -462,12 +388,6 @@ export function createSettingsChatComponent(options: {
       } else editor.handleInput(data);
       render();
     },
-    handleMouse(event: TuiMouseEvent) {
-      if (disposed || signal.aborted || inPaste || historyRows === 0 || event.type !== "wheel" || !event.wheelDelta)
-        return undefined;
-      scrollHistory(event.wheelDelta < 0 ? -3 : 3);
-      return { handled: true, render: true };
-    },
     dispose() {
       if (disposed) return;
       disposed = true;
@@ -475,6 +395,8 @@ export function createSettingsChatComponent(options: {
       signal.removeEventListener("abort", abort);
       unsubscribe();
       transcript.dispose();
+      scroll.setScrollbarActive(false);
+      scroll.setScrollbar("hidden");
       abort();
     },
     async waitForPending() {
@@ -492,35 +414,11 @@ export async function showSettingsChat(
   owner: WorkflowOwner,
   preview: (width: number) => string[],
 ): Promise<SettingsChatAction> {
-  // Keep Kit's cancellation/disposal runner, but mount through Pi's public overlay API.
-  // No second TUI, terminal handoff, or manipulation of unrelated overlay handles is needed.
-  const fullscreenContext: ExtensionCommandContext = {
-    ...ctx,
-    ui: {
-      ...ctx.ui,
-      custom: (factory) =>
-        ctx.ui.custom(factory, {
-          overlay: true,
-          overlayOptions: { width: "100%", maxHeight: "100%", anchor: "top-left", margin: 0 },
-        }),
-    },
-  };
-  const result = await runCustomInteraction<SettingsChatAction>(fullscreenContext, {
-    signal: owner.signal,
-    isCurrent: owner.isCurrent,
-    create: ({ tui, theme, keybindings, signal, complete }) =>
-      createSettingsChatComponent({
-        agent,
-        draft,
-        state,
-        tui,
-        theme,
-        keybindings,
-        signal,
-        preview,
-        complete,
-      }),
-  });
-  if (result.kind === "error") throw result.error;
-  return result.kind === "completed" ? result.value : "discard";
+  return runSettingsChatFullscreen(
+    ctx,
+    owner,
+    ({ tui, theme, keybindings, signal, complete }) =>
+      createSettingsChatComponent({ agent, draft, state, tui, theme, keybindings, signal, preview, complete }),
+    "discard" as SettingsChatAction,
+  );
 }

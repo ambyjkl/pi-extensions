@@ -139,8 +139,11 @@ The configured cancel action stops an active response and restores undelivered m
 Failed or aborted responses also restore undelivered messages without restarting automatically.
 Editor actions win conflicting cancel bindings, and Escape remains a stop fallback unless assigned to an editor action.
 Ctrl+C discards the entire flow, including when cancellation is remapped, and restores the current session's active footer.
-The fullscreen chat reuses Pi's native user, assistant, and tool message components, including Markdown, user-message backgrounds, and message spacing.
-The editor and footer preview stay at the bottom while the transcript grows above them.
+The fullscreen chat uses a Starship-owned `TuiAltScreen` with Pi's native user, assistant, and tool message components, including Markdown, user-message backgrounds, and message spacing.
+A native `ScrollView` holds the history; queued messages, the editor, diagnostics, and footer preview stay in a fixed bottom dock.
+Use the mouse wheel or configured `tui.altScreen.*` viewport actions to scroll history, including `tui.altScreen.pageUp` and `tui.altScreen.pageDown`.
+This intentionally replaces history paging through `tui.editor.pageUp` and `tui.editor.pageDown`; move custom history paging bindings to the corresponding `tui.altScreen.*` actions.
+The editor retains its native editing bindings; native viewport actions take priority when bindings conflict.
 Short gray labels on the editor borders show draft status and controls.
 The full-width preview has no extra separator, with its last line at the terminal bottom, matching the saved footer's position.
 At short heights, error details yield first; if the whole preview cannot fit beside the editor, it is hidden rather than clipped.
@@ -156,6 +159,12 @@ Applying can start enabled module commands and network requests; review those se
 Cancelling the name prompt returns to the chat without saving. Closing, discarding, session replacement, or shutdown removes the temporary draft, not a previously saved profile.
 Detected changes to disk, loaded settings, or the saved profile block stale application; this is not a cross-process lock.
 Saving a repair of an invalid original document requires an explicit repair warning in the confirmation.
+
+The parent TUI is suspended while the chat owns the shared terminal; only one renderer is active at a time.
+Terminal ownership returns before the existing parent-hosted review, profile-name, and apply-confirmation screens open.
+This intentionally deviates from Pi's guidance not to create a second terminal renderer in an extension: Starship uses a separate fullscreen host for native history scrolling and a fixed dock, with lifecycle tests required for safe ownership transfer.
+It is not a claim of official support or a diagnosis or verified fix of the originally reported wheel/key failure.
+See [Configuration chat runtime](https://github.com/narumiruna/pi-extensions/blob/main/packages/pi-starship/docs/configuration-chat-runtime.md) in the repository for ownership rules, verification evidence, and the maintainer's physical-terminal checklist.
 
 Your chat input, settings and runtime module snapshots read by the agent, local paths, and tool results are sent to the selected model provider.
 Do not include secrets in the draft or conversation.
@@ -235,6 +244,7 @@ packages/pi-starship/
 │   └── pi-starship.ts                 # Footer lifecycle and cached refresh
 ├── dist/                              # Generated Jiti runtime
 ├── scripts/build-runtime.mjs          # Runtime builder
+├── docs/                              # Configuration chat runtime and terminal handoff
 ├── skills/configure-pi-starship/      # Authoritative configuration skill and references
 └── test/                              # Behavior and lifecycle coverage
 ```
