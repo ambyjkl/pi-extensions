@@ -99,7 +99,7 @@ Removal returns the current session's affected selection to `default`, but other
 
 ## ⚙️ Settings
 
-Open `/accounts` → **Set default account**, choose a provider, then select a saved account or **Pi built-in login**.
+Open `/accounts` → **Set default account**, choose a provider, then select a saved account or **Pi built-in login**. Only providers with saved accounts appear.
 The picker shows the saved default and saves your selection immediately; leaving it before selecting changes nothing.
 
 Defaults are user-wide settings in `<getAgentDir()>/pi-accounts.json` (normally `~/.pi/agent/pi-accounts.json`); project overrides are not supported.
