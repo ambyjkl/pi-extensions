@@ -28,6 +28,11 @@ export {
   type EditorStatusWidgetOptions,
 } from "./editor-status-widget.js";
 export {
+  createFullscreenHandoff,
+  type FullscreenHandoff,
+  type FullscreenHandoffOptions,
+} from "./fullscreen-handoff.js";
+export {
   HorizontalRule,
   type HorizontalRuleLabelAlignment,
   type HorizontalRuleOptions,

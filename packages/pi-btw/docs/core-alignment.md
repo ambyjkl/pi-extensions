@@ -4,7 +4,15 @@
 
 BTW keeps its side-thread policy separate from Pi's renderer and Kit's shared screens.
 Local improvements do not remove the need for a public Pi workspace API.
-The contracts below are proposals, not available Pi APIs. No external issue, core change, or publication is implied.
+The upstream Pi contracts below are proposals, not available Pi APIs. No external issue, core change, or publication is implied.
+
+## Shared physical handoff extraction
+
+The Kit `createFullscreenHandoff()` resource shares only terminal entry, native drain, stop/start, owned-overlay hiding, and restoration. BTW retains its multi-screen context adapter, private split-pane layout integration, input priority, paste handling, selection/copy, root cancellation, main-thread updates, bring-to-main, and queued settings writes.
+
+The [retained shared matrix and verification record](https://github.com/narumiruna/pi-extensions/blob/main/packages/pi-tui-kit/docs/fullscreen-handoff.md) records two-consumer admission with Starship, lifecycle regressions, artifact and PTY smokes, dependency propagation, and exact-artifact release guards. Historical checks below do not replace the shared resource's evidence. The proposed Pi workspace-composition API remains necessary.
+
+Pi's official [TUI guidance](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/tui.md) advises against a second terminal renderer. BTW intentionally deviates: a second TUI instance exists, but only one renderer actively owns the shared terminal. Extracting the physical lifecycle into Kit does not make that deviation officially supported or remove private layout access from BTW.
 
 ## Evidence boundary
 
@@ -242,7 +250,7 @@ These steps define contract tests, not instructions to open a live provider or i
 
 The Pi core maintainer owns API design, implementation, tests, and publication after repository-owner approval.
 A later authorized BTW migration must pass the existing native-dispatch and terminal-restoration regressions before removing the workaround.
-No new Kit API or raised BTW dependency floor is required for this handoff.
+No new Kit API or raised BTW dependency floor was required for that upstream API proposal. The separate shared physical-handoff extraction above must require the Kit release that first contains its API before dependent publication.
 
 ## Verification and remaining acceptance
 

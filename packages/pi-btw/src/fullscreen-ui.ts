@@ -5,6 +5,7 @@ import {
   type Theme,
 } from "@earendil-works/pi-coding-agent";
 import { type Component, type OverlayHandle, ScrollView, type TUI, truncateToWidth } from "@earendil-works/pi-tui";
+import type { createFullscreenHandoff, FullscreenHandoff } from "@narumitw/pi-tui-kit";
 import {
   type BtwFullscreenTui,
   createBtwFullscreenTui,
@@ -83,6 +84,10 @@ export async function runBtwFullscreen<T>(
   options: BtwFullscreenOptions = {},
   dependencies: BtwFullscreenDependencies = {},
 ): Promise<T> {
+  const { createFullscreenHandoff } = await import("@narumitw/pi-tui-kit/fullscreen-handoff");
+  if (ctx.signal?.aborted || options.signal?.aborted || options.canRestoreParent?.() === false) {
+    throw new FullscreenUiDisposedError();
+  }
   const createTui =
     dependencies.createTui ??
     ((parent: TUI, theme: Theme, keybindings: KeybindingsManager, fullscreenOptions: BtwFullscreenOptions) =>
@@ -121,6 +126,7 @@ export async function runBtwFullscreen<T>(
         },
         createTui,
         options,
+        createFullscreenHandoff,
       );
       return host;
     },
@@ -142,7 +148,7 @@ export async function runBtwFullscreen<T>(
 
 class BtwFullscreenHost<T> implements Component {
   private fullscreen: BtwFullscreenTui | undefined;
-  private parentOverlay: OverlayHandle | undefined;
+  private readonly handoff: FullscreenHandoff<BtwFullscreenTui>;
   private cancelActiveCustom: (() => void) | undefined;
   private hardCancelActiveCustom: (() => void) | undefined;
   private removeHardCancelListener: (() => void) | undefined;
@@ -150,13 +156,8 @@ class BtwFullscreenHost<T> implements Component {
   private started = false;
   private disposed = false;
   private finished = false;
-  private parentStopped = false;
-  private parentRestoreAttempted = false;
-  private fullscreenCreated = false;
-  private fullscreenStopped = false;
-  private parentRestoreQueued = false;
   private parentRestorePromise: Promise<void> | undefined;
-  private cleanupError: unknown;
+  private readonly cleanupErrors: unknown[] = [];
   private removeMainThreadUpdateListener: (() => void) | undefined;
   private mainThreadRefreshTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly mainThreadInput: BtwMainThreadInput;
@@ -175,6 +176,7 @@ class BtwFullscreenHost<T> implements Component {
     private readonly done: (outcome: FullscreenOutcome<T>) => void,
     private readonly createTui: BtwFullscreenTuiFactory,
     private readonly options: BtwFullscreenOptions,
+    createHandoff: typeof createFullscreenHandoff,
   ) {
     const initialMainInput = getFocusedComponent(parent);
     this.mainThreadInput = new BtwMainThreadInput(
@@ -185,12 +187,20 @@ class BtwFullscreenHost<T> implements Component {
       },
       () => this.fullscreen?.requestRender(),
     );
+    this.handoff = createHandoff<BtwFullscreenTui>(parent, {
+      isCurrent: () =>
+        !this.disposed &&
+        !this.finished &&
+        !this.lifetimeController.signal.aborted &&
+        this.options.canRestoreParent?.() !== false,
+      canRestoreParent: () => this.options.canRestoreParent?.() !== false,
+    });
     this.sidePaneRatio = options.sidePaneRatio;
     queueMicrotask(() => void this.start());
   }
 
   setParentOverlay(overlay: OverlayHandle): void {
-    this.parentOverlay = overlay;
+    this.handoff.setOverlayHandle(overlay);
   }
 
   render(width: number): string[] {
@@ -221,12 +231,12 @@ class BtwFullscreenHost<T> implements Component {
         getParentFullscreenLayout(this.parent);
         getParentFullscreenScrollView(this.parent);
       }
-      this.parent.stop({ preserveScreen: true });
-      this.parentStopped = true;
-      if (this.disposed) throw new FullscreenUiDisposedError();
-      this.fullscreen = this.createTui(this.parent, this.theme, this.keybindings, this.options);
-      this.fullscreenCreated = true;
-      this.fullscreen.start();
+      this.fullscreen = await this.handoff.enter(() =>
+        this.createTui(this.parent, this.theme, this.keybindings, this.options),
+      );
+      if (!this.fullscreen || this.disposed || this.finished || this.options.canRestoreParent?.() === false) {
+        throw new FullscreenUiDisposedError();
+      }
       this.watchMainThreadUpdates();
       const shortcuts = resolveBtwShortcuts(
         this.options.keybindings,
@@ -287,11 +297,19 @@ class BtwFullscreenHost<T> implements Component {
     try {
       this.cancelActiveCustom?.();
     } catch (error) {
-      this.cleanupError ??= error;
+      this.cleanupErrors.push(error);
     }
-    if (this.parentRestorePromise) await this.parentRestorePromise;
-    else this.restoreParent();
-    if (this.cleanupError !== undefined) outcome = { kind: "failed", error: this.cleanupError };
+    this.queueParentRestore();
+    await this.parentRestorePromise;
+    if (this.cleanupErrors.length) {
+      outcome = {
+        kind: "failed",
+        error: combineErrors(
+          outcome.kind === "failed" ? [outcome.error, ...this.cleanupErrors] : this.cleanupErrors,
+          "Pi BTW flow and terminal cleanup failed",
+        ),
+      };
+    }
     this.finished = true;
     this.done(outcome);
   }
@@ -333,16 +351,13 @@ class BtwFullscreenHost<T> implements Component {
   }
 
   private queueParentRestore(): void {
-    if (this.parentRestoreQueued || this.parentRestoreAttempted) return;
-    this.parentRestoreQueued = true;
+    if (this.parentRestorePromise) return;
+    const restoration = this.handoff.restore().catch((error: unknown) => {
+      this.cleanupErrors.push(error);
+    });
     this.parentRestorePromise = Promise.resolve().then(async () => {
-      try {
-        await this.fullscreen?.terminal.drainInput?.();
-      } catch (error) {
-        this.cleanupError ??= error;
-      }
-      this.parentRestoreQueued = false;
       this.restoreParent();
+      await restoration;
     });
   }
 
@@ -369,50 +384,26 @@ class BtwFullscreenHost<T> implements Component {
     try {
       removeMainThreadUpdateListener?.();
     } catch (error) {
-      this.cleanupError ??= error;
+      this.cleanupErrors.push(error);
     }
     try {
       this.mainThreadInput.dispose();
     } catch (error) {
-      this.cleanupError ??= error;
+      this.cleanupErrors.push(error);
     }
     const removeUpstreamAbortListener = this.removeUpstreamAbortListener;
     this.removeUpstreamAbortListener = undefined;
     try {
       removeUpstreamAbortListener?.();
     } catch (error) {
-      this.cleanupError ??= error;
+      this.cleanupErrors.push(error);
     }
     const removeHardCancelListener = this.removeHardCancelListener;
     this.removeHardCancelListener = undefined;
     try {
       removeHardCancelListener?.();
     } catch (error) {
-      this.cleanupError ??= error;
-    }
-    if (this.fullscreenCreated && !this.fullscreenStopped) {
-      this.fullscreenStopped = true;
-      try {
-        this.fullscreen?.stop({ preserveScreen: true });
-      } catch (error) {
-        this.cleanupError ??= error;
-      }
-    }
-    if (!this.parentStopped || this.parentRestoreAttempted) return;
-    const parentOverlay = this.parentOverlay;
-    this.parentOverlay = undefined;
-    try {
-      parentOverlay?.setHidden(true);
-    } catch (error) {
-      this.cleanupError ??= error;
-    }
-    try {
-      this.parentRestoreAttempted = true;
-      if (this.options.canRestoreParent?.() === false) return;
-      this.parent.start();
-      this.parent.renderNow(false);
-    } catch (error) {
-      this.cleanupError ??= error;
+      this.cleanupErrors.push(error);
     }
   }
 
@@ -487,23 +478,23 @@ class BtwFullscreenHost<T> implements Component {
         componentDisposed = true;
         try {
           component.dispose?.();
-        } catch {
-          // Cleanup must continue so terminal ownership is restored.
+        } catch (error) {
+          this.cleanupErrors.push(error);
         }
       };
       const unmount = () => {
-        let cleanupError: unknown;
+        const cleanupErrors: unknown[] = [];
         const removeFocusListener = removePaneFocusListener;
         removePaneFocusListener = undefined;
         try {
           removeFocusListener?.();
         } catch (error) {
-          cleanupError = error;
+          cleanupErrors.push(error);
         }
         try {
           splitPane?.dispose();
         } catch (error) {
-          cleanupError ??= error;
+          cleanupErrors.push(error);
         }
         splitPane = undefined;
         try {
@@ -511,18 +502,18 @@ class BtwFullscreenHost<T> implements Component {
           else if (mounted && layoutMounted) fullscreen.setLayoutRoot(undefined);
           else if (mounted && component) fullscreen.removeChild(component);
         } catch (error) {
-          cleanupError ??= error;
+          cleanupErrors.push(error);
         }
         if (overlay || mounted) {
           try {
             fullscreen.setFocus(null);
             fullscreen.requestRender();
           } catch (error) {
-            cleanupError ??= error;
+            cleanupErrors.push(error);
           }
         }
         disposeComponent();
-        if (cleanupError !== undefined) throw cleanupError;
+        if (cleanupErrors.length) throw combineErrors(cleanupErrors, "Pi BTW custom UI cleanup failed");
       };
       const complete = () => {
         if (promiseSettled || !hasPendingValue) return;
@@ -557,7 +548,7 @@ class BtwFullscreenHost<T> implements Component {
           unmount();
           reject(error);
         } catch (cleanupError) {
-          reject(cleanupError);
+          reject(combineErrors([error, cleanupError], "Pi BTW custom UI and cleanup failed"));
         }
       };
       this.cancelActiveCustom = () => {
@@ -708,6 +699,35 @@ class BtwFullscreenHost<T> implements Component {
       await Promise.allSettled([...this.pendingSidePaneWrites]);
     }
   }
+}
+
+// Keep an existing aggregate intact unless it overlaps causes already collected.
+function combineErrors(errors: readonly unknown[], message: string): unknown {
+  const causes: unknown[] = [];
+  const seen = new Set<unknown>();
+  const remember = (error: unknown): void => {
+    if (seen.has(error)) return;
+    seen.add(error);
+    if (error instanceof AggregateError) error.errors.forEach(remember);
+  };
+  const overlaps = (error: unknown, visited = new Set<unknown>()): boolean => {
+    if (seen.has(error)) return true;
+    if (visited.has(error)) return false;
+    visited.add(error);
+    return error instanceof AggregateError && error.errors.some((cause: unknown) => overlaps(cause, visited));
+  };
+  const append = (error: unknown): void => {
+    if (seen.has(error)) return;
+    if (error instanceof AggregateError && overlaps(error)) {
+      seen.add(error);
+      error.errors.forEach(append);
+      return;
+    }
+    causes.push(error);
+    remember(error);
+  };
+  errors.forEach(append);
+  return causes.length === 1 ? causes[0] : new AggregateError(causes, message);
 }
 
 function formatError(error: unknown): string {

@@ -2,6 +2,12 @@
 
 Kit retains its cross-mode adapters. Native transcript search does not replace document-local search, exact document formatting, RPC pages, or asynchronous settlement. The selector audit below covers plan findings F8 and F10 and their F2 input-ownership dependency. [Shared helper alignment](#shared-helper-alignment) records the later cursor, frame, key syntax, and consumer-lifecycle work.
 
+## Fullscreen handoff extraction
+
+The [fullscreen handoff contract matrix](./fullscreen-handoff.md) is the retained admission and verification record for `createFullscreenHandoff()`. Starship's single-component chat and BTW's multi-screen workspace use the same physical lifecycle contract. The linked record names the extraction's tests, artifact checks, release guard, and remaining physical-terminal limits; historical checks below do not replace that evidence.
+
+The resource does not move private host-layout access, input priorities, paste handling, cancellation outcomes, or domain state into Kit. Ordinary `runCustomInteraction()` behavior stays unchanged. Pi's advice against a second renderer remains applicable: the intentional deviation permits a second instance, not two active terminal owners. Same-batch consumer publication requires the production guard's exact Kit registry-artifact verification; dependency ordering alone does not meet that requirement.
+
 ## Corrections
 
 | Proven gap | Correction | Regression evidence |
