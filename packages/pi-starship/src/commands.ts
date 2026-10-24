@@ -174,7 +174,7 @@ async function showMainMenu(ctx: ExtensionCommandContext, options: StarshipComma
           items: [
             {
               id: MAIN_ACTIONS.chat,
-              label: "Configure with agent…",
+              label: "Configure with agent",
               description: "Separate conversation · draft tools · live preview only until you save",
               action: "settings-chat",
             },

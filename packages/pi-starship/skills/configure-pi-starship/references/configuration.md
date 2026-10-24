@@ -23,14 +23,14 @@ Open the interactive menu in TUI mode:
 /starship
 ```
 
-Choose **Configure with agent…** for edits and explanations.
+Choose **Configure with agent** for edits and explanations.
 The compatibility command `/starship settings` retains the raw TOML editor.
 Closing the editor validates the draft and opens a scrollable preview with **Apply changes…**, **Continue editing**, and **Discard draft**.
 Saving requires separate confirmation, then atomically updates the file and active footer.
 Manual TOML edits load at the next `session_start`, including `/reload` and session replacement.
 Cancellation, disposal, invalid drafts, write failures, and runtime application failures preserve the previous file and footer.
 
-Choose **Configure with agent…** for a separate, temporary configuration conversation with the bundled skill and `read`, `write`, and `edit` tools.
+Choose **Configure with agent** for a separate, temporary configuration conversation with the bundled skill and `read`, `write`, and `edit` tools.
 The agent can write only its private draft, not the active settings file; validated mutations update the preview without `/reload`, and invalid mutations retain the last valid preview.
 Reads cover immutable disk and loaded-document snapshots, normalized active public TOML, source/path/health/diagnostics, module inspection, the private draft, and bundled skill/source documents; the draft is limited to 64 KiB.
 These read-only documents are fixed at chat opening and do not change with draft previews or later runtime updates.
@@ -62,7 +62,7 @@ If configuration publication fails after that backup is durable, the failure rep
 A missing document creates no backup, and a backup with the same minute name blocks publication when observed before rename; this check does not provide cross-process locking.
 The interactive `/starship` flows do not invoke this script. They preserve replaced documents in the separate recovery history described below; existing skill backups remain available read-only in History.
 
-The main menu orders **Configure with agent…**, **Presets**, **Profiles**, **Configuration**, **Restore built-in…**, and **Help**.
+The main menu orders **Configure with agent**, **Presets**, **Profiles**, **Configuration**, **Restore built-in…**, and **Help**.
 Configuration shows state, source, settings path, health, and all current warnings above **Reload from disk…**, **Share settings as Gist…**, **Import settings from Gist…**, and **History**.
 Configured selection page-up/page-down actions scroll the summary without moving the selected action; selection and cancellation bindings take priority when bindings conflict.
 The focused action remains visible at small terminal heights; enlarge an extremely short terminal to read the summary.

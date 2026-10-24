@@ -33,13 +33,13 @@ test("main menu has exactly six ordered actions and no duplicate editor or inspe
     const running = mock.commands.get("starship")?.handler("", ctx.ctx);
     await tui.waitForOpen();
     const text = stripVTControlCharacters(tui.render().join("\n"));
-    const labels = ["Configure with agent…", "Presets", "Profiles", "Configuration", "Restore built-in…", "Help"];
+    const labels = ["Configure with agent", "Presets", "Profiles", "Configuration", "Restore built-in…", "Help"];
     const actionRows = text.split("\n").filter((line) => /^(?:→ | {2})\S/u.test(line));
     assert.equal(actionRows.length, labels.length);
     const positions = labels.map((label) => text.indexOf(label));
     assert.ok(positions.every((position, index) => position >= 0 && (index === 0 || position > positions[index - 1])));
     assert.match(text, /edits, module questions, and footer explanations/u);
-    assert.doesNotMatch(text, /Customize footer|Explain footer|Modules|Advanced/u);
+    assert.doesNotMatch(text, /Customize footer|Explain footer|Modules|Advanced|Configure with agent…/u);
     tui.press("ctrl+c");
     await running;
   } finally {
