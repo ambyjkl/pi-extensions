@@ -1,5 +1,11 @@
 # @narumitw/pi-accounts
 
+## 0.53.3
+
+### Patch Changes
+
+- 14c86c5: Hide providers without saved accounts from the default account menu.
+
 ## 0.53.2
 
 ### Patch Changes

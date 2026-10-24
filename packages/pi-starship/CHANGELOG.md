@@ -1,5 +1,16 @@
 # @narumitw/pi-starship
 
+## 0.62.0
+
+### Minor Changes
+
+- eb69a7c: Simplify the footer menu around agent-assisted configuration, presets, profiles, and recovery. Show configuration health and warnings inline, and give the configuration chat read-only opening snapshots of loaded settings and module state. Keep the existing settings editor command and all review, confirmation, Gist, and History safeguards.
+- 047c6b0: Add a separate fullscreen configuration chat with native Pi message rendering, the bundled skill, and draft-only read, write, and edit tools. Native steering, follow-up, and dequeue actions support messages submitted during a response, with undelivered input restored on cancellation or failure. A direct save shortcut opens reviewed profile creation and shows its active key on the editor border. Hard cancellation restores the active footer without redrawing a replaced session. Short gray editor-border labels show status and controls. Valid edits appear immediately without reload in a bottom-aligned footer preview; the user reviews and saves the draft as a named profile before a separate apply confirmation can change active settings, with History and conflict checks. Declining or failing application retains the saved profile.
+
+### Patch Changes
+
+- 55502a4: Remove the trailing ellipsis from Configure with agent to match other menu-opening labels. Keep the existing conversation, preview, and save behavior unchanged.
+
 ## 0.61.0
 
 ### Minor Changes
