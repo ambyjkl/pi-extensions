@@ -142,15 +142,15 @@ test("fullscreen dock handles zero dimensions, callback theme changes, and read-
     assert.equal(frame.length, 40);
     assert.equal(frame.filter((line) => /^─+$/u.test(line)).length, 0);
     const previewRow = frame.findIndex((line) => line.includes("read-only footer"));
-    assert.match(frame[previewRow - 1], /^─ Preview ─+$/u);
+    assert.ok(!frame.some((line) => /─ Preview /u.test(line)));
     assert.equal(previewRow, frame.length - 1);
-    assert.match(frame[previewRow - 4], /^─ pi-starship ─+$/u);
-    assert.match(frame[previewRow - 2], /^─ Valid · unsaved · Cancel review · Ctrl\+C discard ─+$/u);
+    assert.match(frame[previewRow - 3], /^─ pi-starship ─+$/u);
+    assert.match(frame[previewRow - 1], /^─ Valid · unsaved · Cancel review · Ctrl\+C discard ─+$/u);
     assert.ok(dimLabels.some((label) => label.includes("pi-starship")));
     assert.ok(dimLabels.some((label) => label.includes("Valid · unsaved")));
     assert.ok(!frame.some((line) => line.includes("Active file unchanged")));
     assert.ok(previewWidths.every((width) => width === 80));
-    assert.ok(roles.includes("border") && roles.includes("borderMuted") && roles.includes("dim"));
+    assert.ok(roles.includes("borderMuted") && roles.includes("dim"));
     const calls = roles.length;
     component.invalidate();
     component.render(80);
@@ -171,7 +171,7 @@ test("fullscreen dock handles zero dimensions, callback theme changes, and read-
       const start = resized.findIndex((line) => line.includes("PREVIEW-FIRST"));
       if (shown > 0) {
         assert.ok(start >= 0);
-        assert.match(resized[start - 1], /^─ Preview ─+$/u);
+        assert.ok(!resized.some((line) => /─ Preview /u.test(line)));
         assert.equal(resized[start + 1], previewLines[1]);
         assert.equal(start + shown, resized.length);
       } else {

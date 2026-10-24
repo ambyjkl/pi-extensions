@@ -209,10 +209,8 @@ export function createSettingsChatComponent(options: {
       // Match Pi's transcript -> editor -> footer hierarchy. The fullscreen overlay
       // covers the parent footer, so the real draft preview is part of this dock.
       const details = diagnostics.map((line) => theme.fg("muted", line));
-      // The terminal edge closes this fullscreen preview, matching the saved footer's position.
-      // Keep the review menu's lower rule, but put nothing below the live footer here.
-      const previewFrame = renderSettingsChatPreview(width, preview, theme).slice(0, -1);
-      if (input.length + previewFrame.length > rows) {
+      // Render the footer without extra rules, matching its saved position at the terminal bottom.
+      if (input.length + preview.length > rows) {
         return renderBoundedFrame({
           width,
           maxRows: rows,
@@ -223,7 +221,7 @@ export function createSettingsChatComponent(options: {
           priorityRows: [cursor, input.length],
         });
       }
-      const content = [...input, ...details.slice(0, rows - input.length - previewFrame.length), ...previewFrame];
+      const content = [...input, ...details.slice(0, rows - input.length - preview.length), ...preview];
       const available = rows - content.length;
       const history = available > 0 ? transcript.render(width).slice(-available) : [];
       return [...history, ...Array.from({ length: available - history.length }, () => ""), ...content].map((line) =>
