@@ -33,8 +33,11 @@ Choose **Configure with agent…** for a separate, temporary configuration conve
 The agent can write only its private draft, not the active settings file; validated mutations update the preview without `/reload`, and invalid mutations retain the last valid preview.
 Reads cover the immutable active settings snapshot, private draft, and bundled skill/source documents; the draft is limited to 64 KiB.
 The preview uses cached data without starting module commands or network requests.
-The configured cancel action stops a response or opens review when idle; editor actions win collisions, with Escape as a review fallback unless assigned to an editor action.
-Ctrl+C discards the flow.
+During a response, normal submission queues steering for the next assistant turn; the configured app.message.followUp action queues work after natural completion and submits normally when idle.
+The app.message.dequeue action restores pending messages to the editor; these message actions use Pi's native precedence, including explicit history bindings.
+The configured cancel action stops a response and restores undelivered messages, or opens review when idle; editor actions win review-key collisions, with Escape as a review fallback unless assigned to an editor action.
+Failed or aborted responses restore undelivered input without automatic restart.
+Ctrl+C discards the flow and clears both queues.
 The separate Save draft as profile action requires exact-draft review and a profile name; invalid or existing names are rejected without overwriting a profile.
 After saving, the host asks whether to apply that profile through managed History and atomic replacement; declining keeps the profile without changing active settings.
 Cancelling naming returns to the chat without saving; closing or session replacement removes the temporary draft, not any saved profile.

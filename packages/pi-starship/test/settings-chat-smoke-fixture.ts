@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { existsSync, watch, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type AssistantMessage, createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -13,7 +13,9 @@ export default function settingsChatSmokeFixture(pi: ExtensionAPI) {
     mainMessages: -1,
     draftPath: "",
     executedTools: [] as string[],
+    userMessages: [] as string[],
   };
+  const pending = new Set<() => void>();
   const save = () => writeFileSync(join(process.cwd(), "smoke-record.json"), JSON.stringify(record));
   pi.registerProvider("starship-smoke", {
     api: "starship-smoke",
@@ -30,7 +32,7 @@ export default function settingsChatSmokeFixture(pi: ExtensionAPI) {
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       },
     ],
-    streamSimple(model, context) {
+    streamSimple(model, context, options) {
       record.requests += 1;
       const system = context.messages[0];
       assert.ok(system?.role === "system");
@@ -44,8 +46,19 @@ export default function settingsChatSmokeFixture(pi: ExtensionAPI) {
       const toolResults = context.messages.filter((message) => message.role === "toolResult");
       assert.ok(toolResults.every((message) => !message.isError));
       record.executedTools = toolResults.map((message) => message.toolName);
-      const second = context.messages.filter((message) => message.role === "user").length > 1;
-      const toolsNeeded = context.messages.at(-1)?.role === "user";
+      record.userMessages = context.messages
+        .filter((message) => message.role === "user")
+        .map((message) =>
+          typeof message.content === "string"
+            ? message.content
+            : message.content
+                .filter((part) => part.type === "text")
+                .map((part) => part.text)
+                .join(""),
+        );
+      const second = record.userMessages.length > 1;
+      const followUp = record.userMessages.at(-1) === "follow";
+      const toolsNeeded = context.messages.at(-1)?.role === "user" && !followUp;
       const content: AssistantMessage["content"] = toolsNeeded
         ? [
             {
@@ -57,7 +70,12 @@ export default function settingsChatSmokeFixture(pi: ExtensionAPI) {
                 : { path: record.draftPath, content: "# smoke draft\nformat = '$directory'\n" },
             },
           ]
-        : [{ type: "text", text: second ? "SMOKE_SECOND_READY" : "SMOKE_FIRST_READY" }];
+        : [
+            {
+              type: "text",
+              text: followUp ? "SMOKE_FOLLOW_READY" : second ? "SMOKE_SECOND_READY" : "SMOKE_FIRST_READY",
+            },
+          ];
       if (toolsNeeded && !second) {
         const skillDirectory = /Skill base directory: ([^\n]+)/u.exec(prompt)?.[1];
         assert.ok(skillDirectory);
@@ -86,10 +104,43 @@ export default function settingsChatSmokeFixture(pi: ExtensionAPI) {
         timestamp: Date.now(),
       };
       const stream = createAssistantMessageEventStream();
-      stream.push({ type: "done", reason: toolsNeeded ? "toolUse" : "stop", message });
+      if (record.requests === 1) {
+        const partial = { ...message, content: [{ type: "text" as const, text: "SMOKE_QUEUE_WAIT" }] };
+        stream.push({ type: "start", partial });
+        const releasePath = join(process.cwd(), "smoke-release");
+        let finished = false;
+        const finish = (aborted = false) => {
+          if (finished) return;
+          finished = true;
+          dispose();
+          if (aborted)
+            stream.push({
+              type: "error",
+              reason: "aborted",
+              error: { ...message, content: [], stopReason: "aborted" },
+            });
+          else stream.push({ type: "done", reason: "toolUse", message });
+        };
+        const watcher = watch(process.cwd(), () => {
+          if (existsSync(releasePath)) finish();
+        });
+        const abort = () => finish(true);
+        const dispose = () => {
+          watcher.close();
+          options?.signal?.removeEventListener("abort", abort);
+          pending.delete(abort);
+        };
+        pending.add(abort);
+        options?.signal?.addEventListener("abort", abort, { once: true });
+        if (options?.signal?.aborted) abort();
+        else if (existsSync(releasePath)) finish();
+      } else stream.push({ type: "done", reason: toolsNeeded ? "toolUse" : "stop", message });
       save();
       return stream;
     },
+  });
+  pi.on("session_shutdown", () => {
+    for (const cancel of pending) cancel();
   });
   pi.on("session_start", (_event, ctx) => {
     ctx.ui.notify("STARSHIP_SMOKE_READY", "info");

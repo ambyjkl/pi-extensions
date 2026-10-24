@@ -35,6 +35,7 @@ def run(action, mode):
         active = agent / "pi-starship.toml"
         active.write_text(original)
         (agent / "settings.json").write_text(json.dumps({"enableInstallTelemetry": False, "quietStartup": True}))
+        (agent / "keybindings.json").write_text(json.dumps({"app.message.followUp": "ctrl+q"}))
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 44, 120, 0, 0))
         environment = dict(os.environ, PI_CODING_AGENT_DIR=str(agent), TERM="xterm-256color", NO_COLOR="1")
@@ -86,14 +87,19 @@ def run(action, mode):
             send(b"\x1b[B" * 7 + b"\r")
             wait_for("─ pi-starship ")
             send(b"first\r")
-            wait_for("SMOKE_FIRST_READY")
-            assert active.read_text() == original
+            wait_for("SMOKE_QUEUE_WAIT")
             send(b"second\r")
-            wait_for("SMOKE_SECOND_READY")
+            wait_for("Steering: second")
+            send(b"follow\x11")
+            wait_for("Follow-up: follow")
+            assert active.read_text() == original
+            (root / "smoke-release").write_text("ready")
+            wait_for("SMOKE_FOLLOW_READY")
             assert active.read_text() == original
             record = json.loads((root / "smoke-record.json").read_text())
             assert record["skillLoaded"] and record["tools"] == ["read", "write", "edit"]
             assert record["requests"] == 4
+            assert record["userMessages"] == ["first", "second", "follow"]
             assert record["executedTools"] == ["read", "write", "edit"]
             if action in ("save", "save-only"):
                 send(b"\x1b")
@@ -129,7 +135,7 @@ def run(action, mode):
             assert child.returncode == 0
             record = json.loads((root / "smoke-record.json").read_text())
             assert record["mainMessages"] == 0
-            print(f"PASS {mode} {action}: two draft turns, loaded skill, three tools, no parent messages, no reload, cleaned draft")
+            print(f"PASS {mode} {action}: steer + follow-up, loaded skill, three tools, no parent messages, no reload, cleaned draft")
         finally:
             if child.poll() is None:
                 child.terminate()

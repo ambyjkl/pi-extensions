@@ -127,7 +127,13 @@ Previews use cached runtime data and do not start module commands or network req
 These tool limits are not an operating-system sandbox for extension code.
 
 The native editor retains editing, newline, submission, and large-paste behavior.
-The configured cancel action stops an active response; when idle, it opens review actions for continuing, inspecting the full transcript or exact draft, saving, or discarding.
+While the agent runs, normal submission queues a steering message for the next assistant turn; `app.message.followUp` queues a message after the current task finishes.
+The default follow-up key is Alt+Enter, or Ctrl+Q on Windows and WSL; when idle, it submits normally.
+Pending messages appear in gray above the editor, with a count on its upper border; the view shows at most three pending rows.
+Use `app.message.dequeue` (Alt+Up, or Alt+Q on Windows and WSL) to restore queued messages to the editor.
+These message shortcuts use Pi's configured bindings and native precedence, including explicit history actions taking priority.
+The configured cancel action stops an active response and restores undelivered messages to the editor; when idle, it opens review actions for continuing, inspecting the full transcript or exact draft, saving, or discarding.
+Failed or aborted responses also restore undelivered messages without restarting automatically.
 Editor actions win conflicting cancel bindings, and Escape remains a review fallback unless assigned to an editor action.
 Ctrl+C discards the entire flow, including when cancellation is remapped.
 The fullscreen chat reuses Pi's native user, assistant, and tool message components, including Markdown, user-message backgrounds, and message spacing.

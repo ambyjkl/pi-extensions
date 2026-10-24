@@ -1,5 +1,11 @@
 import type { Agent } from "@earendil-works/pi-agent-core";
-import type { ExtensionCommandContext, KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
+import type { UserMessage } from "@earendil-works/pi-ai";
+import {
+  CustomEditor,
+  type ExtensionCommandContext,
+  type KeybindingsManager,
+  type Theme,
+} from "@earendil-works/pi-coding-agent";
 import {
   CURSOR_MARKER,
   Editor,
@@ -23,7 +29,7 @@ export interface ChatViewState {
   error: string;
 }
 
-/** Use the same full-width preview boundary in the conversation and review menu. */
+/** Frame the review menu's footer preview without changing its render width. */
 export function renderSettingsChatPreview(
   width: number,
   preview: readonly string[],
@@ -42,22 +48,31 @@ export function renderSettingsChatPreview(
 }
 
 /** Add labels only to the public Editor border hooks; native scroll indicators keep priority. */
-export class SettingsChatEditor extends Editor {
+export class SettingsChatEditor extends CustomEditor {
   constructor(
     tui: TUI,
     private readonly chromeTheme: Theme,
     private readonly labels: () => { top: string; bottom: string },
+    keybindings: KeybindingsManager,
   ) {
-    super(tui, {
-      borderColor: (text) => chromeTheme.fg("borderMuted", text),
-      selectList: {
-        selectedPrefix: (text) => chromeTheme.fg("accent", text),
-        selectedText: (text) => chromeTheme.fg("accent", text),
-        description: (text) => chromeTheme.fg("muted", text),
-        scrollInfo: (text) => chromeTheme.fg("dim", text),
-        noMatch: (text) => chromeTheme.fg("warning", text),
+    super(
+      tui,
+      {
+        borderColor: (text) => chromeTheme.fg("borderMuted", text),
+        selectList: {
+          selectedPrefix: (text) => chromeTheme.fg("accent", text),
+          selectedText: (text) => chromeTheme.fg("accent", text),
+          description: (text) => chromeTheme.fg("muted", text),
+          scrollInfo: (text) => chromeTheme.fg("dim", text),
+          noMatch: (text) => chromeTheme.fg("warning", text),
+        },
       },
-    });
+      keybindings,
+    );
+  }
+  /** Bypass app shortcuts while the native Editor owns a bracketed paste. */
+  handlePasteInput(data: string): void {
+    Editor.prototype.handleInput.call(this, data);
   }
   protected renderTopBorder(width: number, hiddenLineCount: number): string {
     return hiddenLineCount > 0
@@ -140,51 +155,104 @@ export function createSettingsChatComponent(options: {
   let disposed = false;
   let inPaste = false;
   let pending: Promise<void> | undefined;
-  const editor = new SettingsChatEditor(tui, theme, () => {
-    const status =
-      state.error || agent.state.errorMessage
-        ? "Agent error"
-        : !draft.candidate
-          ? "Invalid"
-          : draft.diagnostics
-            ? "Warnings"
-            : "Valid";
-    return {
-      top: "pi-starship",
-      bottom: `${status} · unsaved · ${pending ? "Working · Cancel stop" : "Cancel review"} · Ctrl+C discard`,
-    };
-  });
+  let stopping = false;
+  const queued: Array<{ kind: "steer" | "followUp"; message: UserMessage; text: string }> = [];
+  const editor = new SettingsChatEditor(
+    tui,
+    theme,
+    () => {
+      const status =
+        state.error || agent.state.errorMessage
+          ? "Agent error"
+          : !draft.candidate
+            ? "Invalid"
+            : draft.diagnostics
+              ? "Warnings"
+              : "Valid";
+      return {
+        top: queued.length > 0 ? `pi-starship · ${queued.length} queued` : "pi-starship",
+        bottom: `${status} · unsaved · ${pending ? "Working · Cancel stop" : "Cancel review"} · Ctrl+C discard`,
+      };
+    },
+    keybindings,
+  );
   editor.setText(state.input);
   const render = () => {
     if (!disposed && !signal.aborted) tui.requestRender();
   };
-  const unsubscribe = agent.subscribe(render);
+  const unsubscribe = agent.subscribe((event) => {
+    if (event.type === "message_start") {
+      const index = queued.findIndex((item) => item.message === event.message);
+      if (index >= 0) queued.splice(index, 1);
+    }
+    render();
+  });
+  const clearQueue = () => {
+    queued.length = 0;
+    agent.clearAllQueues();
+  };
+  const restoreQueue = () => {
+    const messages = [
+      ...queued.filter((item) => item.kind === "steer"),
+      ...queued.filter((item) => item.kind === "followUp"),
+    ].map((item) => item.text);
+    clearQueue();
+    if (messages.length > 0) editor.setText([...messages, editor.getExpandedText()].filter(Boolean).join("\n\n"));
+  };
   const abort = () => {
+    stopping = true;
+    clearQueue();
     agent.abort();
   };
   signal.addEventListener("abort", abort, { once: true });
   const rule = new HorizontalRule({ ruleStyle: (text) => theme.fg("border", text) });
   const transcript = createSettingsChatTranscript(agent, tui, draft.directory);
-  // Native Editor expands paste markers and clears itself before calling onSubmit.
-  editor.onSubmit = (input) => {
-    if (pending || signal.aborted || disposed) return;
+  const failed = () => {
+    const last = agent.state.messages.at(-1);
+    return last?.role === "assistant" && (last.stopReason === "error" || last.stopReason === "aborted");
+  };
+  const submit = (input: string, kind: "steer" | "followUp") => {
+    if (signal.aborted || disposed) return;
     if (!input.trim()) return;
+    // Native submission clears the editor first. Retain input typed while an abort settles.
+    if (pending && stopping) {
+      editor.setText(input);
+      return;
+    }
     editor.addToHistory(input);
     editor.setText("");
     state.error = "";
-    editor.disableSubmit = true;
-    pending = agent
-      .prompt(input)
-      .catch((error: unknown) => {
-        if (!disposed && !signal.aborted) state.error = error instanceof Error ? error.message : String(error);
-      })
-      .finally(() => {
-        pending = undefined;
-        editor.disableSubmit = false;
-        render();
-      });
+    if (pending) {
+      const message: UserMessage = { role: "user", content: [{ type: "text", text: input }], timestamp: Date.now() };
+      queued.push({ kind, message, text: input });
+      if (kind === "steer") agent.steer(message);
+      else agent.followUp(message);
+    } else {
+      stopping = false;
+      pending = (async () => {
+        try {
+          await agent.prompt(input);
+          // agent_end listeners can enqueue after the loop's final poll. Wait for actual
+          // idle settlement before continuing; never resume cancelled or failed runs.
+          while (!disposed && !signal.aborted && !stopping && !failed() && agent.hasQueuedMessages()) {
+            await agent.continue();
+          }
+        } catch (error) {
+          if (!disposed && !signal.aborted) state.error = error instanceof Error ? error.message : String(error);
+        } finally {
+          pending = undefined;
+          if (!disposed && !signal.aborted) restoreQueue();
+          else clearQueue();
+          render();
+        }
+      })();
+    }
     render();
   };
+  // Native Editor expands paste markers and clears itself before calling onSubmit.
+  editor.onSubmit = (input) => submit(input, "steer");
+  editor.onAction("app.message.followUp", () => submit(editor.getExpandedText().trim(), "followUp"));
+  editor.onAction("app.message.dequeue", restoreQueue);
   return {
     get focused() {
       return editor.focused;
@@ -221,7 +289,19 @@ export function createSettingsChatComponent(options: {
           priorityRows: [cursor, input.length],
         });
       }
-      const content = [...input, ...details.slice(0, rows - input.length - preview.length), ...preview];
+      const detailLines = details.slice(0, rows - input.length - preview.length);
+      const queueLines = [
+        ...queued.filter((item) => item.kind === "steer"),
+        ...queued.filter((item) => item.kind === "followUp"),
+      ]
+        .slice(0, Math.min(3, rows - input.length - preview.length - detailLines.length))
+        .map((item) =>
+          theme.fg(
+            "dim",
+            `${item.kind === "steer" ? "Steering" : "Follow-up"}: ${sanitizeTerminalDocument(item.text).replace(/\n/gu, " ")}`,
+          ),
+        );
+      const content = [...queueLines, ...input, ...detailLines, ...preview];
       const available = rows - content.length;
       const history = available > 0 ? transcript.render(width).slice(-available) : [];
       return [...history, ...Array.from({ length: available - history.length }, () => ""), ...content].map((line) =>
@@ -237,13 +317,16 @@ export function createSettingsChatComponent(options: {
       // Forward entire paste packets and fragments without interpreting embedded shortcuts.
       if (inPaste || data.includes("\x1b[200~")) {
         inPaste = !data.includes("\x1b[201~");
-        editor.handleInput(data);
+        editor.handlePasteInput(data);
       } else if (matchesKey(data, Key.ctrl("c"))) {
-        agent.abort();
+        abort();
         options.complete("discard");
       } else if (settingsChatReviewInput(data, keybindings)) {
-        if (pending) agent.abort();
-        else {
+        if (pending) {
+          stopping = true;
+          restoreQueue();
+          agent.abort();
+        } else {
           state.input = editor.getExpandedText();
           options.complete("review");
         }
@@ -257,7 +340,7 @@ export function createSettingsChatComponent(options: {
       signal.removeEventListener("abort", abort);
       unsubscribe();
       transcript.dispose();
-      agent.abort();
+      abort();
     },
     async waitForPending() {
       await pending;

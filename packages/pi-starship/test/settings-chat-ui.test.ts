@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Agent } from "@earendil-works/pi-agent-core";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { CustomEditor, type ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import {
   CURSOR_MARKER,
   Editor,
@@ -23,14 +23,22 @@ import {
   createSettingsChatComponent,
   SettingsChatEditor,
   settingsChatReviewInput,
+  settingsChatTranscript,
   showSettingsChat,
 } from "../src/settings-chat-ui.js";
 import { createSettingsDraft } from "../src/settings-draft.js";
 import { response, settingsChatCustom, testModel } from "./settings-chat-support.js";
 
+const CHAT_KEYS = {
+  ...TUI_KEYBINDINGS,
+  "app.message.followUp": { defaultKeys: "alt+enter" },
+  "app.message.dequeue": { defaultKeys: "alt+up" },
+} as const;
+
 function fixture(
   streamFn: ConstructorParameters<typeof Agent>[0]["streamFn"] = () =>
     response([{ type: "text", text: "Preview updated\x1b]52;c;secret\x07" }]),
+  keys = new KeybindingsManager(CHAT_KEYS),
 ) {
   const root = mkdtempSync(join(tmpdir(), "starship-ui-test-"));
   const controller = new AbortController();
@@ -42,7 +50,9 @@ function fixture(
     onPreview() {},
   });
   const agent = new Agent({ initialState: { model: { ...testModel, input: ["text"] }, tools: draft.tools }, streamFn });
-  const tui = createTuiHarness({ rows: 32 });
+  const previousKeys = getKeybindings();
+  setKeybindings(keys);
+  const tui = createTuiHarness({ rows: 32, keybindings: keys });
   const overlayOptions: unknown[] = [];
   const ctx = createMockContext({
     mode: "tui",
@@ -67,6 +77,7 @@ function fixture(
     state,
     running,
     overlayOptions,
+    keys,
     async dispose() {
       controller.abort();
       tui.dispose();
@@ -75,6 +86,7 @@ function fixture(
       await agent.waitForIdle();
       draft.dispose();
       rmSync(root, { force: true, recursive: true });
+      setKeybindings(previousKeys);
     },
   };
 }
@@ -97,7 +109,12 @@ test("editor border labels preserve native hidden-line indicators", () => {
     borderColor: plain,
     selectList: { selectedPrefix: plain, selectedText: plain, description: plain, scrollInfo: plain, noMatch: plain },
   });
-  const labeled = new LabeledEditor(tui, theme, () => ({ top: "pi-starship", bottom: "Valid · unsaved" }));
+  const labeled = new LabeledEditor(
+    tui,
+    theme,
+    () => ({ top: "pi-starship", bottom: "Valid · unsaved" }),
+    getKeybindings() as unknown as ConstructorParameters<typeof SettingsChatEditor>[3],
+  );
   for (const width of [0, 1, 5, 80]) {
     for (const hidden of [1, 12, 100]) assert.deepEqual(labeled.borders(width, hidden), native.borders(width, hidden));
     assert.ok(labeled.borders(width, 0).every((line) => visibleWidth(line) <= width));
@@ -295,6 +312,11 @@ for (const exit of ["escape", "hard cancel", "disposal", "owner abort"] as const
       f.tui.send("\r");
       await started;
       assert.match(f.tui.render().join("\n"), /Working/u);
+      f.tui.type("steer while waiting");
+      f.tui.send("\r");
+      f.tui.type("follow up while waiting");
+      f.tui.send("\x1b\r");
+      assert.equal(f.agent.hasQueuedMessages(), true);
       if (exit === "escape") {
         f.tui.send("\x1b");
         await f.tui.waitForPending();
@@ -307,8 +329,338 @@ for (const exit of ["escape", "hard cancel", "disposal", "owner abort"] as const
       assert.equal(result, exit === "escape" ? "review" : "discard");
       assert.equal(aborted, true);
       assert.equal(f.agent.state.isStreaming, false);
+      assert.equal(f.agent.hasQueuedMessages(), false);
     } finally {
       await f.dispose();
+    }
+  });
+}
+
+test("steering precedes tool continuation; follow-up waits for natural completion with a stable request prefix", async () => {
+  const stream = createAssistantMessageEventStream();
+  const requests: Parameters<NonNullable<ConstructorParameters<typeof Agent>[0]["streamFn"]>>[1][] = [];
+  const pendingRows: string[] = [];
+  let ready!: () => void;
+  const started = new Promise<void>((done) => {
+    ready = done;
+  });
+  const f = fixture((_model, context) => {
+    requests.push(structuredClone(context));
+    pendingRows.push(f.tui.render().join("\n"));
+    if (requests.length === 1) {
+      ready();
+      return stream;
+    }
+    if (requests.length === 2)
+      return response(
+        [{ type: "toolCall", id: "second-read", name: "read", arguments: { path: f.draft.path } }],
+        "toolUse",
+      );
+    return response([{ type: "text", text: "Done" }]);
+  });
+  const users = (index: number) =>
+    requests[index].messages
+      .filter((message) => message.role === "user")
+      .map((message) =>
+        typeof message.content === "string"
+          ? message.content
+          : message.content
+              .filter((part) => part.type === "text")
+              .map((part) => part.text)
+              .join(""),
+      );
+  try {
+    await f.tui.waitForOpen();
+    f.tui.setFocused(true);
+    f.tui.type("start");
+    f.tui.send("\r");
+    await started;
+    // Duplicate content must remain in its own queue, not be removed by text matching.
+    const text = "same\x1b]52;c;secret\x07";
+    f.tui.type(text);
+    f.tui.send("\x1b\r");
+    f.tui.type(text);
+    f.tui.send("\r");
+    const queuedFrame = f.tui.render();
+    assert.match(queuedFrame.join("\n"), /Steering: same/u);
+    assert.match(queuedFrame.join("\n"), /Follow-up: same/u);
+    assert.ok(!queuedFrame.join("\n").includes("\x1b]52"));
+    assert.equal(queuedFrame.at(-1), "FOOTER PREVIEW");
+    assert.match(queuedFrame.join("\n"), /2 queued/u);
+    for (const rows of [4, 8, 32])
+      for (const width of [1, 5, 80]) {
+        f.tui.resize({ rows, width });
+        const resized = f.tui.render(width);
+        assert.ok(resized.length <= rows);
+        assert.ok(resized.every((line) => visibleWidth(line) <= width));
+        if (width === 80) assert.ok(resized.some((line) => line.includes(CURSOR_MARKER)));
+      }
+    f.tui.resize({ rows: 32, width: 80 });
+    assert.equal(f.agent.state.messages.filter((message) => message.role === "user").length, 1);
+    const first = await response(
+      [{ type: "toolCall", id: "first-read", name: "read", arguments: { path: f.draft.path } }],
+      "toolUse",
+    ).result();
+    stream.push({ type: "done", reason: "toolUse", message: first });
+    await f.tui.waitForPending();
+    assert.equal(requests.length, 4);
+    assert.equal(users(1).length, 2);
+    assert.equal(users(2).length, 2);
+    assert.equal(users(3).length, 3);
+    assert.equal(users(1).at(-1), text);
+    assert.equal(users(3).at(-1), text);
+    assert.ok(!pendingRows[1].includes("Steering:"));
+    assert.ok(pendingRows[1].includes("Follow-up:"));
+    assert.ok(!pendingRows[3].includes("Follow-up:"));
+    assert.equal(settingsChatTranscript(f.agent).filter((line) => line.startsWith("You:")).length, 3);
+    for (const request of requests.slice(1)) {
+      assert.deepEqual(request.messages.slice(0, requests[0].messages.length), requests[0].messages);
+      assert.deepEqual(
+        request.messages.filter((message) => message.role === "system"),
+        requests[0].messages.filter((message) => message.role === "system"),
+      );
+    }
+    assert.equal(f.agent.hasQueuedMessages(), false);
+  } finally {
+    stream.push({ type: "error", reason: "aborted", error: await response([], "aborted").result() });
+    await f.dispose();
+  }
+});
+
+for (const cancel of [false, true])
+  for (const kind of ["steer", "followUp"] as const) {
+    test(`${kind} queued during agent_end ${cancel ? "is retained on cancel" : "continues only after idle settlement"}`, async () => {
+      let ended!: () => void;
+      const ending = new Promise<void>((done) => {
+        ended = done;
+      });
+      let release!: () => void;
+      const gate = new Promise<void>((done) => {
+        release = done;
+      });
+      let requests = 0;
+      const f = fixture(() => {
+        requests += 1;
+        return response([{ type: "text", text: "Done" }]);
+      });
+      const unsubscribe = f.agent.subscribe(async (event) => {
+        if (event.type === "agent_end" && requests === 1) {
+          ended();
+          await gate;
+        }
+      });
+      try {
+        await f.tui.waitForOpen();
+        f.tui.type("first");
+        f.tui.send("\r");
+        await ending;
+        assert.equal(f.agent.state.isStreaming, true);
+        if (cancel) f.tui.send("\x1b");
+        f.tui.type("late");
+        f.tui.send(kind === "steer" ? "\r" : "\x1b\r");
+        assert.equal(requests, 1);
+        release();
+        await f.tui.waitForPending();
+        assert.equal(requests, cancel ? 1 : 2);
+        assert.equal(f.agent.hasQueuedMessages(), false);
+        f.tui.send("\x1b");
+        assert.equal(await f.running, "review");
+        assert.equal(f.state.input, cancel ? "late" : "");
+      } finally {
+        release();
+        unsubscribe();
+        await f.dispose();
+      }
+    });
+  }
+
+for (const outcome of ["dequeue", "error", "aborted"] as const) {
+  test(`${outcome} restores undelivered messages with expanded input and never auto-resumes`, async () => {
+    const stream = createAssistantMessageEventStream();
+    let requests = 0;
+    let ready!: () => void;
+    const started = new Promise<void>((done) => {
+      ready = done;
+    });
+    const f = fixture(() => {
+      requests += 1;
+      ready();
+      return stream;
+    });
+    try {
+      await f.tui.waitForOpen();
+      f.tui.type("first");
+      f.tui.send("\r");
+      await started;
+      f.tui.type("later");
+      f.tui.send("\x1b\r");
+      f.tui.type("sooner");
+      f.tui.send("\r");
+      const paste = "line\n".repeat(40);
+      f.tui.send(`\x1b[200~${paste}\x1b[201~`);
+      if (outcome === "dequeue") f.tui.send("\x1b[1;3A");
+      const message = await response(
+        [{ type: "text", text: "Done" }],
+        outcome === "dequeue" ? "stop" : outcome,
+      ).result();
+      stream.push({ type: "done", reason: message.stopReason as "stop", message });
+      await f.tui.waitForPending();
+      assert.equal(requests, 1);
+      assert.equal(f.agent.hasQueuedMessages(), false);
+      f.tui.send("\x1b");
+      assert.equal(await f.running, "review");
+      assert.equal(f.state.input, `sooner\n\nlater\n\n${paste}`);
+      assert.ok(!f.state.input.includes("[paste #"));
+    } finally {
+      stream.push({ type: "error", reason: "aborted", error: await response([], "aborted").result() });
+      await f.dispose();
+    }
+  });
+}
+
+test("multiple steering and follow-up messages drain one at a time in priority order", async () => {
+  const stream = createAssistantMessageEventStream();
+  let ready!: () => void;
+  const started = new Promise<void>((done) => {
+    ready = done;
+  });
+  const seen: unknown[] = [];
+  const largeFollowUp = "follow-one\n".repeat(40).trim();
+  const keys = new KeybindingsManager(CHAT_KEYS, {
+    "tui.input.submit": "ctrl+s",
+    "app.message.followUp": "ctrl+alt+x",
+  });
+  const previousKitty = isKittyProtocolActive();
+  setKittyProtocolActive(true);
+  const f = fixture((_model, context) => {
+    const last = context.messages.at(-1);
+    seen.push(
+      last?.role === "user"
+        ? typeof last.content === "string"
+          ? last.content
+          : last.content
+              .filter((part) => part.type === "text")
+              .map((part) => part.text)
+              .join("")
+        : undefined,
+    );
+    if (seen.length === 1) {
+      ready();
+      return stream;
+    }
+    return response([{ type: "text", text: "Done" }]);
+  }, keys);
+  try {
+    await f.tui.waitForOpen();
+    f.tui.type("first");
+    f.tui.send("\x13");
+    await started;
+    for (const [text, packet] of [
+      [largeFollowUp, "\x1b[120;7u"],
+      ["steer-one", "\x13"],
+      ["follow-two", "\x1b[120;7u"],
+      ["steer-two", "\x13"],
+    ]) {
+      if (text === largeFollowUp) f.tui.send(`\x1b[200~${text}\x1b[201~`);
+      else f.tui.type(text);
+      f.tui.send(packet);
+    }
+    assert.match(f.tui.render().join("\n"), /4 queued/u);
+    const message = await response([{ type: "text", text: "Done" }]).result();
+    stream.push({ type: "done", reason: "stop", message });
+    await f.tui.waitForPending();
+    assert.deepEqual(seen.slice(1), ["steer-one", "steer-two", largeFollowUp, "follow-two"]);
+    assert.equal(f.agent.hasQueuedMessages(), false);
+  } finally {
+    stream.push({ type: "error", reason: "aborted", error: await response([], "aborted").result() });
+    await f.dispose();
+    setKittyProtocolActive(previousKitty);
+  }
+});
+
+test("follow-up when idle submits normally, and fragmented paste never triggers message actions", async () => {
+  const inputs: unknown[] = [];
+  const f = fixture((_model, context) => {
+    inputs.push(context.messages.at(-1)?.content);
+    return response([{ type: "text", text: "Done" }]);
+  });
+  try {
+    await f.tui.waitForOpen();
+    f.tui.type("idle");
+    f.tui.send("\x1b\r");
+    await f.tui.waitForPending();
+    assert.equal(inputs.length, 1);
+    f.tui.send("\x1b[200~paste");
+    f.tui.send("\x1b\r");
+    f.tui.send("\x1b[1;3A");
+    f.tui.send("\x1b[201~");
+    assert.equal(inputs.length, 1);
+    assert.equal(f.agent.hasQueuedMessages(), false);
+    f.tui.send("\x1b");
+    assert.equal(await f.running, "review");
+    assert.equal(f.state.input, "paste\n[1;3A");
+  } finally {
+    await f.dispose();
+  }
+});
+
+for (const [name, configured, packet, kitty, follows, history] of [
+  ["alias", "alt+return", "\x1b\r", false, true, false],
+  ["Kitty legacy alt-enter is newline", "alt+enter", "\x1b\r", true, false, false],
+  ["Kitty alt-enter", "alt+enter", "\x1b[13;3u", true, true, false],
+  ["modifier order", "alt+ctrl+x", "\x1b[120;7u", true, true, false],
+  ["case", "CTRL+ALT+X", "\x1b[120;7u", true, true, false],
+  ["legacy tab collision", "ctrl+i", "\t", false, true, false],
+  ["Kitty legacy tab", "ctrl+i", "\t", true, true, false],
+  ["Kitty ctrl+i", "ctrl+i", "\x1b[105;5u", true, true, false],
+  ["modifyOtherKeys", "ctrl+alt+x", "\x1b[27;7;120~", false, true, false],
+  ["explicit history priority", "alt+enter", "\x1b\r", false, false, true],
+  ["invalid binding", "ctrl+", "\x1b\r", false, false, false],
+  ["disabled action", [], "\x1b\r", false, false, false],
+  ["first usable alternative", ["ctrl+", "ctrl+alt+x"], "\x1b[120;7u", true, true, false],
+] as const) {
+  test(`message shortcuts match native CustomEditor for ${name}`, () => {
+    const previous = getKeybindings();
+    const previousKitty = isKittyProtocolActive();
+    const keys = new KeybindingsManager(CHAT_KEYS, {
+      "app.message.followUp": configured as never,
+      ...(history ? { "tui.editor.historyPrevious": "alt+enter" as const } : {}),
+    });
+    setKeybindings(keys);
+    setKittyProtocolActive(kitty);
+    try {
+      const tui = { requestRender() {} } as ConstructorParameters<typeof Editor>[0];
+      const plain = (value: string) => value;
+      const theme = {
+        borderColor: plain,
+        selectList: {
+          selectedPrefix: plain,
+          selectedText: plain,
+          description: plain,
+          scrollInfo: plain,
+          noMatch: plain,
+        },
+      };
+      const native = new CustomEditor(tui, theme, keys as unknown as ConstructorParameters<typeof CustomEditor>[2]);
+      const labeled = new SettingsChatEditor(
+        tui,
+        { fg: (_role: string, value: string) => value } as ConstructorParameters<typeof SettingsChatEditor>[1],
+        () => ({ top: "pi-starship", bottom: "unsaved" }),
+        keys as unknown as ConstructorParameters<typeof SettingsChatEditor>[3],
+      );
+      const calls = [0, 0];
+      for (const [index, editor] of [native, labeled].entries()) {
+        editor.setText("input");
+        editor.onAction("app.message.followUp", () => {
+          calls[index] += 1;
+        });
+        editor.handleInput(packet);
+      }
+      assert.deepEqual(calls, [Number(follows), Number(follows)]);
+      assert.equal(labeled.getExpandedText(), native.getExpandedText());
+    } finally {
+      setKeybindings(previous);
+      setKittyProtocolActive(previousKitty);
     }
   });
 }
