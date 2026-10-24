@@ -121,7 +121,6 @@ function fixture(
     async submit() {
       await tui.waitForOpen();
       if (route === "command") {
-        for (let index = 0; index < 7; index++) tui.press("tui.select.down");
         tui.press("tui.select.confirm");
         await tui.waitForOpen();
       }
@@ -154,6 +153,55 @@ function fixture(
     },
   };
 }
+
+test("chat captures active module inspection once without confusing loaded, disk, and draft settings", async () => {
+  let inspections = 0;
+  const f = fixture("format = '$model'\n", {
+    getInspection() {
+      inspections += 1;
+      return { modules: [], showing: [] };
+    },
+  });
+  writeFileSync(f.settingsPath, "format = '$directory'\n");
+  let request = 0;
+  let snapshotResult = "";
+  f.ctx.modelRegistry.streamSimple = (_model, input) => {
+    request += 1;
+    if (request === 1) {
+      const prompt = input.messages[0];
+      const text = prompt?.role === "system" && typeof prompt.content === "string" ? prompt.content : "";
+      const directory = /Tool working directory: ([^\n]+)/u.exec(text)?.[1];
+      return response(
+        ["active-document.toml", "active-effective.toml", "active-modules.json"].map((name) => ({
+          type: "toolCall" as const,
+          id: name,
+          name: "read",
+          arguments: { path: join(directory ?? "", name) },
+        })),
+        "toolUse",
+      );
+    }
+    snapshotResult = input.messages
+      .filter((message) => message.role === "toolResult")
+      .flatMap((message) => message.content.map((part) => (part.type === "text" ? part.text : "")))
+      .join("\n");
+    return response([{ type: "text", text: "Read-only snapshot inspected." }]);
+  };
+  try {
+    await f.submit();
+    assert.equal(inspections, 1);
+    assert.match(snapshotResult, /"available": true/u);
+    assert.match(snapshotResult, /format = '\$model'/u);
+    assert.doesNotMatch(snapshotResult, /format = '\$directory'/u);
+    assert.equal(f.applied, 0);
+    assert.equal(f.previews.filter(Boolean).length, 0);
+    assert.equal(readFileSync(f.settingsPath, "utf8"), "format = '$directory'\n");
+    f.sendRaw("\x03");
+    await f.running;
+  } finally {
+    await f.dispose();
+  }
+});
 
 test("agent edits preview immediately; reviewed save creates a named profile before applying with History", async () => {
   const f = fixture();

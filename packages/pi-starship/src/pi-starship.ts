@@ -430,7 +430,7 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
     },
   };
   pi.registerCommand("starship", {
-    description: "Customize or inspect the native Starship-style footer",
+    description: "Configure the footer with agent, presets, profiles, and recovery",
     getArgumentCompletions: completeStarshipArguments,
     handler: async (args, ctx) => {
       const interactive = ctx.mode === "tui" && (!args.trim() || args.trim().toLowerCase() === "settings");

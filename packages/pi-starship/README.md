@@ -49,7 +49,7 @@ Do not enable this with `@narumitw/pi-statusline`: both own Pi's footer, and Pi 
 ## 🚀 Quick start
 
 Start Pi with the extension to use the built-in footer without creating a settings file.
-Run `/starship` to inspect the footer, choose a preset, or customize the configuration.
+Run `/starship` and choose **Configure with agent…** for edits and explanations, or choose a preset.
 
 The bundled configuration skill is manual-only and is not available for automatic model invocation.
 Run `/skill:configure-pi-starship` before asking Pi to explain or edit `pi-starship.toml`:
@@ -68,16 +68,16 @@ It does not cover general TOML, shell Starship configuration, extension source d
 
 | Command | Purpose |
 | --- | --- |
-| `/starship` | Customize the footer, preview presets, inspect modules, or restore built-in configuration; RPC shows help. |
+| `/starship` | Configure with agent, manage profiles, preview presets, or recover settings; RPC shows help. |
 | `/starship settings` | Edit, preview, and confirm TOML; RPC shows the file path. |
 | `/starship status` | Show the configuration source, path, and diagnostics. |
 | `/starship help` | Show command and configuration help. |
 
 All routes support TUI and RPC with the exceptions above and reject unknown or trailing arguments.
 Print and JSON modes produce no command output; the footer runs only in TUI mode.
-Profiles, history, preset selection, module inspection, and Gist sharing and import are menu-only, not extra subcommands.
+Profiles, history, preset selection, configuration chat, and Gist sharing and import are menu-only, not extra subcommands.
 Restoring built-in configuration requires an existing settings document to replace; see [Settings](#-settings).
-Effective TOML and settings-document reviews support literal document search in TUI mode: Space opens search, configured search-close exits search, and Back retains its existing meaning. Search does not modify settings.
+Configuration shows source, path, health, and warnings above its reload, Gist, and History operations. Configured selection page-up/page-down actions scroll long summaries without changing the selected operation.
 
 ## ⚙️ Settings
 
@@ -121,7 +121,9 @@ The main conversation, tools, and model selection are unchanged; the chat is not
 Its usage is separate from the main session's usage totals.
 
 The agent has `read`, `write`, and `edit`, but no shell tool.
-Reads are limited to an immutable settings snapshot, the private draft, and bundled configuration skill/source documents; writes and edits can change only the private draft, limited to 64 KiB.
+Reads are limited to immutable disk and loaded-settings snapshots, normalized active TOML, configuration diagnostics, module inspection, the private draft, and bundled configuration skill/source documents; writes and edits can change only the private draft, limited to 64 KiB.
+Active-state snapshots are fixed when the chat opens, not continuously current; draft previews do not update them. Module inspection uses existing runtime data without starting collectors and reports when the footer is unavailable.
+The disk baseline can differ from the loaded document after external edits. The ordinary main-session skill does not gain live runtime access; use this chat for active-state questions.
 Each valid edit updates the footer preview immediately, without `/reload`; an invalid edit returns diagnostics and retains the last valid preview until repaired.
 Previews use cached runtime data and do not start module commands or network requests.
 These tool limits are not an operating-system sandbox for extension code.
@@ -154,7 +156,7 @@ Cancelling the name prompt returns to the chat without saving. Closing, discardi
 Detected changes to disk, loaded settings, or the saved profile block stale application; this is not a cross-process lock.
 Saving a repair of an invalid original document requires an explicit repair warning in the confirmation.
 
-Your chat input, settings read by the agent, local paths, and tool results are sent to the selected model provider.
+Your chat input, settings and runtime module snapshots read by the agent, local paths, and tool results are sent to the selected model provider.
 Do not include secrets in the draft or conversation.
 This flow requires TUI mode and a model whose provider supports normal tool calls; it does not load parent extensions, project instructions, MCP tools, or the main transcript into the child.
 

@@ -84,11 +84,12 @@ async function openGistAction(f: ReturnType<typeof fixture>, action: "share" | "
   const mock = createMockPi();
   registerStarshipCommand(mock.pi, f.options);
   const running = Promise.resolve(mock.commands.get("starship")?.handler("", f.context.ctx));
-  await waitForText(f.tui, "Customize footer");
-  for (let index = 0; index < 4; index += 1) f.tui.press("tui.select.down");
+  await f.tui.waitForOpen();
+  for (let index = 0; index < 3; index += 1) f.tui.press("tui.select.down");
   f.tui.press("tui.select.confirm");
-  await waitForText(f.tui, "Share settings as Gist");
-  for (let index = 0; index < (action === "share" ? 4 : 5); index += 1) f.tui.press("tui.select.down");
+  await f.tui.waitForOpen();
+  assert.match(f.tui.render().join("\n"), /Share settings as Gist/u);
+  for (let index = 0; index < (action === "share" ? 1 : 2); index += 1) f.tui.press("tui.select.down");
   f.tui.press("tui.select.confirm");
   return { running };
 }
