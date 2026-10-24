@@ -113,15 +113,16 @@ function fixture(remapped = false, editor?: ExtensionCommandContext["ui"]["edito
 async function openCandidate(f: ReturnType<typeof fixture>, kind: "profile" | "history", actions = false) {
   await f.tui.waitForOpen();
   if (kind === "profile") {
-    f.tui.press("end");
+    f.press("down");
+    f.press("down");
     f.press("confirm");
     await f.tui.waitForOpen();
     f.press("down");
   } else {
-    for (let index = 0; index < 4; index += 1) f.press("down");
+    for (let index = 0; index < 3; index += 1) f.press("down");
     f.press("confirm");
     await f.tui.waitForOpen();
-    f.tui.press("end");
+    for (let index = 0; index < 3; index += 1) f.press("down");
     f.press("confirm");
     await f.tui.waitForOpen();
   }

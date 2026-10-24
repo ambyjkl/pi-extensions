@@ -8,7 +8,6 @@ import {
   SettingsList,
   Text,
   type TuiMouseEvent,
-  truncateToWidth,
 } from "@earendil-works/pi-tui";
 import { sanitizeTerminalDocument } from "@narumitw/pi-tui-kit/terminal-document";
 import { sanitizeProgressText } from "./progress-renderer.js";
@@ -26,7 +25,7 @@ export async function showProgressSettings(
   ctx: ExtensionCommandContext,
   options: ProgressSettingsUIOptions,
 ): Promise<"back" | "close" | "stale"> {
-  const { formatInteractionHints, HorizontalRule, renderBoundedFrame, runCustomInteraction } = await import(
+  const { formatInteractionHints, HorizontalRule, renderBoundedFrameLayout, runCustomInteraction } = await import(
     "@narumitw/pi-tui-kit"
   );
   const result = await runCustomInteraction<"back" | "close" | "stale">(ctx, {
@@ -223,27 +222,17 @@ export async function showProgressSettings(
         },
         render(width: number) {
           renderedWidth = Number.isFinite(width) ? Math.max(0, Math.floor(width)) : 0;
-          const content = list.render(renderedWidth);
+          // Native rows need four cells to retain their cursor; Kit clips the final frame.
+          const content = list.render(Math.max(4, renderedWidth));
           contentHeight = content.length;
           mouseRows.clear();
-          // Layout stable row tokens, then restore text and native coordinates after clipping.
-          // Blank rows stay blank so compact retention matches the original content.
-          const tokens = new Map<string, number>();
-          const layoutContent = content.map((line, index) => {
-            if (!stripVTControlCharacters(line).trim() && !(itemLimitInput && index === 0)) return line;
-            const token = `content:${index}`;
-            tokens.set(token, index);
-            return token;
-          });
-          // SettingsList reserves three cells for ellipsis, hiding its arrow below four cells.
-          // Item row positions do not depend on width, so use a wider render only to locate focus.
-          const focusContent = !itemLimitInput && renderedWidth < 4 ? list.render(4) : content;
+
           const focusedRow = itemLimitInput
             ? 0
-            : focusContent.findIndex((line) => stripVTControlCharacters(line).startsWith("→"));
+            : content.findIndex((line) => stripVTControlCharacters(line).startsWith("→"));
           const terminalRows = Number.isFinite(tui.terminal.rows) ? Math.floor(tui.terminal.rows) : 24;
-          const frame = renderBoundedFrame({
-            width: Math.max(renderedWidth, `content:${content.length}`.length),
+          const frame = renderBoundedFrameLayout({
+            width: renderedWidth,
             maxRows: Math.max(1, terminalRows - 3),
             rule: rule.render(renderedWidth)[0] ?? "",
             title: new Text(
@@ -252,15 +241,12 @@ export async function showProgressSettings(
               0,
             ).render(renderedWidth),
             context: [theme.fg("muted", "Saved changes apply immediately.")],
-            content: layoutContent,
+            content,
             priorityRows: focusedRow < 0 ? [] : [focusedRow],
             focusedRow,
           });
-          return frame.map((line, row) => {
-            const nativeRow = tokens.get(line);
-            if (nativeRow !== undefined) mouseRows.set(row, nativeRow);
-            return truncateToWidth(nativeRow === undefined ? line : (content[nativeRow] ?? ""), renderedWidth, "");
-          });
+          for (const { frameIndex, contentIndex } of frame.contentRows) mouseRows.set(frameIndex, contentIndex);
+          return frame.lines;
         },
         invalidate() {
           mouseRows.clear();

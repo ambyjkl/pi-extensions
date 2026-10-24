@@ -102,9 +102,9 @@ The three build-backed widget consumers allow only the exact `@narumitw/pi-tui-k
 
 The maintainer owns publication through the established release workflow after explicit approval and passing verification. This work does not authorize publishing, tags, visibility changes, or release dispatch. New frame/key APIs must be registry-visible before consumer imports or minimum dependency ranges require them. Installation of the future release remains unverified until publication.
 
-After publication, separately authorized consumer changes can remove Progress/Subagents row tokens and adopt key syntax normalization in compatible BTW/Notes/Ticker paths. Preserve native controls and caller policy; do not replace collision checking with canonical equality. Run root installation, inspect Kit resolution, typecheck, and repeat affected tests and loader smokes after a floor increase.
+The [consumer consolidation audit](./ui-consolidation-audit.md) records adoption after exact registry-artifact verification: Progress/Subagents replace row tokens, Notes/Ticker share compatible syntax normalization, Sync adopts masked input with its local hard-cancel policy, and Usage adopts interaction ownership. Native controls, collision checking, settings persistence, and session policy remain consumer-owned.
 
-Sync secret-input consolidation must wait for a published Kit release containing the cursor correction. Langfuse adoption additionally requires an explicit compatibility decision for its existing plaintext RPC flow: Kit's masked input is TUI-only and returns `unsupported` elsewhere. Required values, blank-to-keep semantics, validation, setup, and credential storage remain local.
+BTW adoption remains blocked because the published key helper has no focused export for its eager settings graph. Langfuse adoption still requires an explicit compatibility decision for its plaintext RPC flow: Kit's masked input is TUI-only and returns `unsupported` elsewhere. Required values, blank-to-keep semantics, validation, setup, and credential storage remain local.
 
 ### Physical terminal handoff
 

@@ -71,6 +71,6 @@
     "directory": "packages/pi-usage"
   },
   "dependencies": {
-    "@narumitw/pi-tui-kit": "^0.61.0"
+    "@narumitw/pi-tui-kit": "^0.66.0"
   }
 }

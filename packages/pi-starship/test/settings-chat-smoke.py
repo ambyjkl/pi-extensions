@@ -74,7 +74,9 @@ def run(action, mode):
                 if deadline is not None and time.monotonic() > deadline:
                     raise AssertionError(f"Timed out waiting for {text!r}\n{output[-8000:]}")
                 receive()
+            observed = output
             output = output[output.index(text) + len(text):]
+            return observed
 
         def send(data):
             os.write(master, data)
@@ -83,8 +85,16 @@ def run(action, mode):
             wait_for("STARSHIP_SMOKE_READY")
             ready = True
             send(b"/starship\r")
+            main_frame = wait_for("Configure with agent") + wait_for("esc close")
+            assert all(label in main_frame for label in ("Presets", "Profiles", "Configuration", "Restore built-in", "Help"))
+            assert all(label not in main_frame for label in ("Customize footer", "Explain footer", "Modules"))
+            send(b"\x1b[B" * 3 + b"\r")
+            config_frame = wait_for("Source: User file") + wait_for("Reload from disk") + wait_for("ctrl+c close")
+            assert all(label in config_frame for label in ("State:", "Path:", "Health:", "History"))
+            assert all(label not in config_frame for label in ("Overview", "Effective configuration", "Settings document"))
+            send(b"\x1b")
             wait_for("Configure with agent")
-            send(b"\x1b[B" * 7 + b"\r")
+            send(b"\x1b[H\r")
             wait_for("─ pi-starship ")
             send(b"first\r")
             wait_for("SMOKE_QUEUE_WAIT")

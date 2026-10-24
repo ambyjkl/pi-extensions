@@ -6,8 +6,10 @@ import { createAssistantMessageEventStream, type Message } from "@earendil-works
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { test } from "vitest";
 import { createMockContext } from "../../../test/support.js";
+import { loadStarshipConfig } from "../src/config.js";
 import { createSettingsAgent, starshipPackageRoot } from "../src/settings-agent.js";
 import { createSettingsDraft } from "../src/settings-draft.js";
+import { settingsSnapshots } from "../src/settings-snapshots.js";
 
 import { response, testModel } from "./settings-chat-support.js";
 
@@ -48,7 +50,14 @@ test("real child Agent loads skill, executes only draft tools, and preserves ord
   const settingsPath = join(root, "pi-starship.toml");
   const baseline = Buffer.from("# retained\nformat = '$model'\n");
   writeFileSync(settingsPath, baseline);
-  const draft = createSettingsDraft({ settingsPath, baseline, packageRoot, isCurrent: () => true, onPreview() {} });
+  const draft = createSettingsDraft({
+    settingsPath,
+    baseline,
+    packageRoot,
+    snapshots: settingsSnapshots(loadStarshipConfig(settingsPath), settingsPath, undefined),
+    isCurrent: () => true,
+    onPreview() {},
+  });
   const requests: Message[][] = [];
   const calls: Array<{ provider: string; reasoning: unknown; signal: AbortSignal | undefined }> = [];
   const parent = [{ role: "user", text: "parent only" }];
@@ -81,6 +90,12 @@ test("real child Agent loads skill, executes only draft tools, and preserves ord
         [
           {
             type: "toolCall",
+            id: "active-state",
+            name: "read",
+            arguments: { path: join(draft.directory, "active-state.json") },
+          },
+          {
+            type: "toolCall",
             id: "edit-2",
             name: "edit",
             arguments: { path: draft.path, edits: [{ oldText: "$directory", newText: "$model$directory" }] },
@@ -99,6 +114,8 @@ test("real child Agent loads skill, executes only draft tools, and preserves ord
     assert.equal(agent.state.thinkingLevel, "low");
     assert.match(agent.state.systemPrompt, /# Configure pi-starship/u);
     assert.match(agent.state.systemPrompt, /Hosted preview-only chat/u);
+    assert.match(agent.state.systemPrompt, /fixed at chat opening, not continuously current/u);
+    for (const path of draft.snapshotPaths) assert.ok(agent.state.systemPrompt.includes(path));
     assert.ok(agent.state.systemPrompt.includes(join(packageRoot, "skills/configure-pi-starship")));
     await agent.prompt("Use directory only");
     assert.equal(draft.candidate?.rawDocument, "format = '$directory'\n");
