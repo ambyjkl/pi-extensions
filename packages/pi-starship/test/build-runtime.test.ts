@@ -18,7 +18,7 @@ const { packageRoot, loadBuilder } = registerRuntimeBuilderContract({
   packageId: "pi-starship",
   forbiddenEagerInputs: [
     "src/commands.ts",
-    "src/command-inspector.ts",
+    "src/command-configuration-menu.ts",
     "src/command-preset-picker.ts",
     "src/command-preview.ts",
     "src/command-profiles.ts",
@@ -29,6 +29,7 @@ const { packageRoot, loadBuilder } = registerRuntimeBuilderContract({
     "src/settings-chat-ui.ts",
     "src/settings-chat-transcript.ts",
     "src/settings-draft.ts",
+    "src/settings-snapshots.ts",
     "src/presets/catalog.ts",
     "src/runtime/cloud.ts",
     "src/runtime/deployment.ts",
@@ -137,11 +138,20 @@ test("generated runtime is loadable by Pi's Jiti resource loader", async () => {
       assert.ok(command);
       await command.handler("status", { ...(context.ctx as ExtensionCommandContext), mode: "rpc" });
       assert.match(context.notifications.at(-1)?.message ?? "", /source: user[\s\S]*warnings: none/u);
-      // Resolve and exercise the generated command/profile chunks through Jiti, not Vitest imports.
+      // Exercise the generated menu, summary, profile, chat, and snapshot chunks through Jiti.
       const running = command.handler("", context.ctx);
       try {
         await tui.waitForOpen();
-        tui.press("end");
+        for (let index = 0; index < 3; index++) tui.press("tui.select.down");
+        tui.press("tui.select.confirm");
+        await tui.waitForOpen();
+        const configurationFrame = tui.render().join("\n");
+        assert.match(configurationFrame, /Source: User file/u);
+        assert.match(configurationFrame, /→ Reload from disk/u);
+        assert.doesNotMatch(configurationFrame, /Overview|Effective configuration|Settings document/u);
+        tui.press("tui.select.cancel");
+        await tui.waitForOpen();
+        tui.press("tui.select.up");
         assert.match(tui.render().join("\n"), /→ Profiles/u);
         tui.press("tui.select.confirm");
         await tui.waitForOpen();
@@ -154,18 +164,40 @@ test("generated runtime is loadable by Pi's Jiti resource loader", async () => {
         const ctx = context.ctx as ExtensionCommandContext;
         ctx.model = { ...testModel, input: ["text"] };
         let skillLoaded = false;
+        let snapshotRead = false;
+        let requests = 0;
         ctx.modelRegistry.streamSimple = (_model, request) => {
+          requests += 1;
           const system = request.messages[0];
           skillLoaded =
             system?.role === "system" &&
             typeof system.content === "string" &&
             system.content.includes("# Configure pi-starship");
+          if (requests === 1) {
+            const prompt = system?.role === "system" && typeof system.content === "string" ? system.content : "";
+            const directory = /Tool working directory: ([^\n]+)/u.exec(prompt)?.[1] ?? "";
+            return response(
+              [
+                {
+                  type: "toolCall",
+                  id: "snapshot",
+                  name: "read",
+                  arguments: { path: join(directory, "active-state.json") },
+                },
+              ],
+              "toolUse",
+            );
+          }
+          snapshotRead = request.messages.some(
+            (message) =>
+              message.role === "toolResult" &&
+              !message.isError &&
+              JSON.stringify(message.content).includes("loadedDocumentAvailable"),
+          );
           return response([{ type: "text", text: "Generated chat ready" }]);
         };
         const chat = command.handler("", ctx);
         await tui.waitForOpen();
-        tui.press("end");
-        tui.press("tui.select.up");
         tui.press("tui.select.confirm");
         await tui.waitForOpen();
         const chatFrame = tui.render().join("\n");
@@ -176,6 +208,7 @@ test("generated runtime is loadable by Pi's Jiti resource loader", async () => {
         await chat;
         assert.match(chatFrame, /─ pi-starship /u);
         assert.equal(skillLoaded, true);
+        assert.equal(snapshotRead, true);
       } finally {
         tui.dispose();
         await running;

@@ -9,7 +9,6 @@ import {
   loadStarshipConfig,
   readConfigDocumentSnapshot,
 } from "./config.js";
-import { serializeEffectiveConfig } from "./effective-config.js";
 import { presetForDocument } from "./presets/catalog.js";
 import { archiveConfigDocument } from "./profile-store.js";
 
@@ -77,33 +76,18 @@ export function configurationPresentation(loaded: LoadedStarshipConfig): Configu
   };
 }
 
-export function configurationMenuScreen(loaded: LoadedStarshipConfig) {
+export function configurationMenuScreen(loaded: LoadedStarshipConfig, settingsPath: string) {
   const presentation = configurationPresentation(loaded);
   return {
     kind: "actions" as const,
     title: "Configuration",
-    lines: [`${presentation.state} · ${presentation.health}`],
+    lines: [
+      `State: ${presentation.state}`,
+      `Source: ${presentation.source}`,
+      `Path: ${sanitizeTerminalText(settingsPath)}`,
+      ...diagnosticLines(loaded, true, loaded.diagnostics.length),
+    ],
     items: [
-      {
-        id: "configuration-overview",
-        label: "Overview",
-        description: "State, source, path, health, and warnings",
-        to: "configuration-overview" as const,
-      },
-      {
-        id: "configuration-effective",
-        label: "Effective configuration",
-        description: "Normalized public TOML currently in use",
-        to: "configuration-effective" as const,
-      },
-      {
-        id: "configuration-document",
-        label: "Settings document",
-        description: isHealthyMissing(loaded)
-          ? "No settings file · built-in defaults are active"
-          : "Exact loaded UTF-8 text · read-only",
-        to: "configuration-document" as const,
-      },
       {
         id: "configuration-reload",
         label: "Reload from disk…",
@@ -128,65 +112,6 @@ export function configurationMenuScreen(loaded: LoadedStarshipConfig) {
         description: "Review and restore recovery copies; legacy skill backups are read-only",
         action: "history" as const,
       },
-    ],
-    hint: "back" as const,
-  };
-}
-
-export function configurationOverviewScreen(loaded: LoadedStarshipConfig, settingsPath: string) {
-  const presentation = configurationPresentation(loaded);
-  return {
-    kind: "detail" as const,
-    title: "Configuration overview",
-    lines: [
-      `State: ${presentation.state}`,
-      `Source: ${presentation.source}`,
-      `Path: ${sanitizeTerminalText(settingsPath)}`,
-      ...diagnosticLines(loaded, true),
-    ],
-    hint: "back" as const,
-  };
-}
-
-export function effectiveConfigurationScreen(loaded: LoadedStarshipConfig) {
-  const presentation = configurationPresentation(loaded);
-  return {
-    kind: "review" as const,
-    title: "Effective configuration",
-    lines: [
-      `${presentation.state} · ${presentation.health}`,
-      "Normalized public TOML; comments and unknown fields are intentionally excluded.",
-    ],
-    content: serializeEffectiveConfig(loaded.config),
-    enableSearch: true,
-    format: { kind: "code" as const, language: "toml" },
-    viewportSize: "adaptive" as const,
-    hint: "back" as const,
-  };
-}
-
-export function settingsDocumentScreen(loaded: LoadedStarshipConfig, settingsPath: string) {
-  const path = sanitizeTerminalText(settingsPath);
-  if (loaded.rawDocument !== undefined) {
-    return {
-      kind: "review" as const,
-      title: "Settings document",
-      lines: ["Exact loaded UTF-8 text · display controls sanitized · read-only", `Path: ${path}`],
-      content: loaded.rawDocument,
-      enableSearch: true,
-      format: { kind: "code" as const, language: "toml" },
-      viewportSize: "adaptive" as const,
-      hint: "back" as const,
-    };
-  }
-  return {
-    kind: "detail" as const,
-    title: "Settings document",
-    lines: [
-      ...(isHealthyMissing(loaded)
-        ? ["No settings document exists.", "Built-in defaults are active; this read created no file."]
-        : ["The settings document could not be loaded.", ...diagnosticLines(loaded, false)]),
-      `Path: ${path}`,
     ],
     hint: "back" as const,
   };
@@ -348,9 +273,9 @@ function reloadPreviewBody(
   ];
 }
 
-export function diagnosticLines(loaded: LoadedStarshipConfig, includeSummary: boolean): string[] {
+export function diagnosticLines(loaded: LoadedStarshipConfig, includeSummary: boolean, limit = 8): string[] {
   const diagnostics = loaded.diagnostics
-    .slice(0, 8)
+    .slice(0, limit)
     .map((item) => `${sanitizeTerminalText(item.path || "root")}: ${sanitizeTerminalText(item.message)}`);
   const remaining = loaded.diagnostics.length - diagnostics.length;
   return [

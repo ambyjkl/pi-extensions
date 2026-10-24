@@ -14,7 +14,7 @@ export const { buildRuntime, validateEagerGraph, validateGeneratedFiles, publish
   ].join("\n"),
   forbiddenEagerInputs: [
     "src/commands.ts",
-    "src/command-inspector.ts",
+    "src/command-configuration-menu.ts",
     "src/command-preset-picker.ts",
     "src/command-preview.ts",
     "src/command-profiles.ts",
@@ -25,6 +25,7 @@ export const { buildRuntime, validateEagerGraph, validateGeneratedFiles, publish
     "src/settings-chat-ui.ts",
     "src/settings-chat-transcript.ts",
     "src/settings-draft.ts",
+    "src/settings-snapshots.ts",
     "src/presets/catalog.ts",
     "src/runtime/cloud.ts",
     "src/runtime/deployment.ts",

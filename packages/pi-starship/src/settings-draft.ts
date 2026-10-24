@@ -20,6 +20,7 @@ import {
   withFileMutationQueue,
 } from "@earendil-works/pi-coding-agent";
 import { BUILT_IN_EXAMPLE, type LoadedStarshipConfig, validateConfigDocument } from "./config.js";
+import type { settingsSnapshots } from "./settings-snapshots.js";
 
 const MAX_DRAFT_BYTES = 64 * 1024;
 
@@ -27,6 +28,7 @@ export interface SettingsDraftOptions {
   settingsPath: string;
   baseline: Buffer | undefined;
   packageRoot: string;
+  snapshots?: ReturnType<typeof settingsSnapshots>;
   isCurrent(): boolean;
   onPreview(loaded: LoadedStarshipConfig): void;
 }
@@ -39,6 +41,10 @@ export function createSettingsDraft(options: SettingsDraftOptions) {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), "pi-starship-draft-")));
   const path = join(directory, "pi-starship.toml");
   const baseline = options.baseline && Buffer.from(options.baseline);
+  const snapshots = new Map(
+    Object.entries(options.snapshots ?? {}).map(([name, content]) => [join(directory, name), content]),
+  );
+  const snapshotPaths = [...snapshots.keys()];
   let disposed = false;
   let removed = false;
   let revision = 0;
@@ -99,6 +105,14 @@ export function createSettingsDraft(options: SettingsDraftOptions) {
       return Buffer.from(baseline);
     }
     if (resolve(target) === path) return readDraft();
+    if (snapshots.has(resolve(target))) {
+      const content = snapshots.get(resolve(target));
+      if (content === undefined)
+        throw new Error(
+          "No exact loaded settings document is available; read active-state.json for its source and diagnostics",
+        );
+      return Buffer.from(content);
+    }
     const canonical = realpathSync(target);
     if (
       !roots.some((root) => {
@@ -174,7 +188,7 @@ export function createSettingsDraft(options: SettingsDraftOptions) {
     },
   });
   read.description =
-    "Read text from the immutable settings snapshot, owned draft, or bundled configuration skill/source documents. Output is limited to 50 KiB or 2,000 lines; use offset and limit to continue.";
+    "Read text from immutable disk/active configuration and module snapshots, the owned draft, or bundled configuration skill/source documents. Output is limited to 50 KiB or 2,000 lines; use offset and limit to continue.";
   write.description =
     "Replace only the owned pi-starship TOML draft, up to 64 KiB. The host validates and previews it. Invalid text stays in the draft and returns an error for repair. Never writes the active settings file.";
   edit.description +=
@@ -216,6 +230,7 @@ export function createSettingsDraft(options: SettingsDraftOptions) {
   return {
     directory,
     path,
+    snapshotPaths,
     tools: [read, write, edit] as [typeof read, typeof write, typeof edit],
     get revision() {
       return revision;

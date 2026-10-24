@@ -48,7 +48,8 @@ test("the main-menu profile apply adopts its own revision and preserves the prev
   const running = mock.commands.get("starship")?.handler("", context.ctx);
   try {
     await tui.waitForOpen();
-    tui.press("end");
+    tui.press("tui.select.down");
+    tui.press("tui.select.down");
     assert.match(tui.render().join("\n"), /→ Profiles/u);
     tui.press("tui.select.confirm");
     await tui.waitForOpen();
@@ -113,7 +114,8 @@ test("selecting an untrusted profile cannot emit terminal controls before apply 
   const running = mock.commands.get("starship")?.handler("", context.ctx);
   try {
     await tui.waitForOpen();
-    tui.press("end");
+    tui.press("tui.select.down");
+    tui.press("tui.select.down");
     tui.press("tui.select.confirm");
     await tui.waitForOpen();
     tui.press("tui.select.down");

@@ -69,7 +69,7 @@ test("/starship keeps direct routes and opens a stateful narrow TUI menu", async
   assert.match(screen, /pi-starship/u);
   assert.match(screen, /Saved built-in configuration/u);
   assert.match(screen, /Healthy/u);
-  assert.match(screen, /Customize footer/u);
+  assert.match(screen, /Configure with agent/u);
   assert.match(screen, /Presets/u);
   assert.match(screen, /Configuration/u);
   assert.match(screen, /Help/u);
@@ -78,7 +78,7 @@ test("/starship keeps direct routes and opens a stateful narrow TUI menu", async
   assert.ok(renders.flat().every((line) => visibleWidth(line) <= 28));
 });
 
-test("Explain consumes the current snapshot without starting collection work", async () => {
+test("Configuration browsing does not start collection work", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-starship-command-explain-snapshot-"));
   const previous = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = root;
@@ -104,17 +104,16 @@ test("Explain consumes the current snapshot without starting collection work", a
     );
     footer.render(60);
     await flushAsyncWork();
-    const callsBeforeExplain = execCalls;
+    const callsBeforeMenu = execCalls;
 
     const running = mock.commands.get("starship")?.handler("", context.ctx);
     await tui.waitForOpen();
-    tui.press("tui.select.down");
-    tui.press("tui.select.down");
+    for (let index = 0; index < 3; index++) tui.press("tui.select.down");
     tui.press("tui.select.confirm");
     await tui.waitForOpen();
-    assert.match(tui.render().join("\n"), /Explain footer/u);
+    assert.match(tui.render().join("\n"), /Configuration/u);
     await flushAsyncWork();
-    assert.equal(execCalls, callsBeforeExplain);
+    assert.equal(execCalls, callsBeforeMenu);
     assert.equal(existsSync(settingsFilePath(root)), false);
     tui.press("ctrl+c");
     await running;
@@ -502,7 +501,7 @@ test("non-TUI settings never opens an editor and status/help are protocol-safe",
     assert.equal(editorCalls, 0);
     assert.match(rpc.notifications.at(-1)?.message ?? "", /pi-starship\.toml/);
     await mock.commands.get("starship")?.handler("", rpc.ctx);
-    assert.match(rpc.notifications.at(-1)?.message ?? "", /explain.*inspect.*TUI mode/iu);
+    assert.match(rpc.notifications.at(-1)?.message ?? "", /configure with agent.*TUI mode/iu);
 
     const print = createMockContext({ mode: "print", hasUI: false });
     await mock.commands.get("starship")?.handler("status", print.ctx);
@@ -627,8 +626,7 @@ test("main and Configuration menus expose current state and a clear Back path", 
     mode: "tui",
     hasUI: true,
     custom: async (factory: unknown) => {
-      const inputs =
-        call === 0 ? ["\u001b[B", "\u001b[B", "\u001b[B", "\u001b[B", "\r"] : call === 1 ? ["\r"] : ["\u001b"];
+      const inputs = call === 0 ? ["\u001b[B", "\u001b[B", "\u001b[B", "\r"] : ["\u001b"];
       const driven = await driveTuiCustom(factory, inputs, 26);
       screens[call++] = driven.renders.flat().join("\n");
       assert.ok(driven.renders.flat().every((line) => visibleWidth(line) <= 26));
@@ -636,11 +634,11 @@ test("main and Configuration menus expose current state and a clear Back path", 
     },
   });
   await mock.commands.get("starship")?.handler("", context.ctx);
-  assert.equal(call, 5);
+  assert.equal(call, 3);
   assert.match(screens[1] ?? "", /Configuration/u);
-  assert.match(screens[2] ?? "", /State: Built-in defaults/u);
-  assert.match(screens[2] ?? "", /Source: No settings file/u);
-  assert.match(screens[4] ?? "", /Customize footer/u);
+  assert.match(screens[1] ?? "", /State: Built-in defaults/u);
+  assert.match(screens[1] ?? "", /Source: No settings file/u);
+  assert.match(screens[2] ?? "", /Configure with agent/u);
 });
 
 test("Restore previews, confirms, and atomically applies the built-in footer", async () => {
@@ -667,8 +665,7 @@ test("Restore previews, confirms, and atomically applies the built-in footer", a
       mode: "tui",
       hasUI: true,
       custom: async (factory: unknown) => {
-        const inputs =
-          call === 0 ? ["\u001b[B", "\u001b[B", "\u001b[B", "\u001b[B", "\u001b[B", "\u001b[B", "\r"] : ["\r"];
+        const inputs = call === 0 ? ["\u001b[B", "\u001b[B", "\u001b[B", "\u001b[B", "\r"] : ["\r"];
         const driven = await driveTuiCustom(factory, inputs, 32);
         if (call === 1) restorePreview = driven.renders.flat().join("\n");
         call += 1;
@@ -718,8 +715,7 @@ test("Restore recovers a malformed settings document", async () => {
       mode: "tui",
       hasUI: true,
       custom: async (factory: unknown) => {
-        const inputs =
-          call++ === 0 ? ["\u001b[B", "\u001b[B", "\u001b[B", "\u001b[B", "\u001b[B", "\u001b[B", "\r"] : ["\r"];
+        const inputs = call++ === 0 ? ["\u001b[B", "\u001b[B", "\u001b[B", "\u001b[B", "\r"] : ["\r"];
         return (await driveTuiCustom(factory, inputs, 60)).result;
       },
       confirm: async () => true,
@@ -784,18 +780,24 @@ test("Configuration and Help stay shallow and fit narrow terminals", async () =>
       apply() {},
       settingsPath: path,
     });
-    const choices = ["Configuration", "Overview", undefined, undefined, "Help", undefined, undefined];
     const screens: string[] = [];
-    const context = createMockContext({
-      mode: "tui",
-      hasUI: true,
-      select: async (title: string) => {
-        screens.push(title);
-        return choices.shift();
-      },
-    });
-    await mock.commands.get("starship")?.handler("", context.ctx);
-    assert.equal(screens.length, 7);
+    const tui = createTuiHarness({ width: 70, rows: 26 });
+    const context = createMockContext({ mode: "tui", hasUI: true, custom: tui.custom });
+    const running = mock.commands.get("starship")?.handler("", context.ctx);
+    await tui.waitForOpen();
+    for (let index = 0; index < 3; index++) tui.press("tui.select.down");
+    tui.press("tui.select.confirm");
+    await tui.waitForOpen();
+    screens.push(tui.render().join("\n"));
+    tui.press("tui.select.cancel");
+    await tui.waitForOpen();
+    tui.press("end");
+    tui.press("tui.select.confirm");
+    await tui.waitForOpen();
+    screens.push(tui.render().join("\n"));
+    tui.press("ctrl+c");
+    await running;
+    tui.dispose();
     assert.match(screens.join("\n"), /1 warning/u);
     assert.match(screens.join("\n"), /Configuration/u);
     assert.match(screens.join("\n"), /pi-starship help/u);
@@ -835,7 +837,7 @@ test("restore preview cancellation preserves exact settings and runtime in a nar
     });
     const running = mock.commands.get("starship")?.handler("", context.ctx);
     await tui.waitForOpen();
-    for (let index = 0; index < 6; index += 1) tui.press("tui.select.down");
+    for (let index = 0; index < 4; index += 1) tui.press("tui.select.down");
     tui.press("tui.select.confirm");
     await tui.waitForOpen();
     const preview = tui.render();

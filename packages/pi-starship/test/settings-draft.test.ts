@@ -14,8 +14,9 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "vitest";
-import type { LoadedStarshipConfig } from "../src/config.js";
+import { type LoadedStarshipConfig, loadStarshipConfig } from "../src/config.js";
 import { createSettingsDraft } from "../src/settings-draft.js";
+import { settingsSnapshots } from "../src/settings-snapshots.js";
 
 const packageRoot = resolve(import.meta.dirname, "..");
 function fixture(baseline: Buffer | undefined = Buffer.from("# retained\nformat = '$model'\nunknown_field = 42\n")) {
@@ -28,6 +29,7 @@ function fixture(baseline: Buffer | undefined = Buffer.from("# retained\nformat 
     settingsPath,
     baseline,
     packageRoot,
+    snapshots: settingsSnapshots(loadStarshipConfig(settingsPath), settingsPath, undefined),
     isCurrent: () => current,
     onPreview: (loaded) => previews.push(loaded),
   });
@@ -192,6 +194,38 @@ test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
     }
   },
 );
+
+test("active snapshots stay immutable, read-only, and session-owned across draft edits", async () => {
+  const f = fixture();
+  const readText = async (path: string) => {
+    const result = await f.read.execute("snapshot", { path });
+    return result.content.map((part) => (part.type === "text" ? part.text : "")).join("\n");
+  };
+  try {
+    assert.equal(f.draft.snapshotPaths.length, 4);
+    const initial = await Promise.all(f.draft.snapshotPaths.map(readText));
+    assert.match(initial[0], /# retained.*unknown_field = 42/su);
+    assert.match(initial[1], /\[brand\]/u);
+    assert.doesNotMatch(initial[1], /# retained|unknown_field/u);
+    assert.equal(JSON.parse(initial[2]).path, f.settingsPath);
+    assert.equal(JSON.parse(initial[3]).available, false);
+    assert.match(JSON.parse(initial[3]).reason, /unavailable/u);
+    writeFileSync(f.settingsPath, "external change");
+    await f.write.execute("draft", { path: f.draft.path, content: "format = '$directory'\n" });
+    assert.deepEqual(await Promise.all(f.draft.snapshotPaths.map(readText)), initial);
+    for (const path of f.draft.snapshotPaths) {
+      await assert.rejects(f.write.execute("bad", { path, content: "bad" }));
+      await assert.rejects(f.edit.execute("bad", { path, edits: [{ oldText: "model", newText: "bad" }] }));
+      assert.equal(existsSync(path), false);
+    }
+    f.stale();
+    await assert.rejects(readText(f.draft.snapshotPaths[0]), /owner/u);
+    f.draft.dispose();
+    await assert.rejects(readText(f.draft.snapshotPaths[1]), /owner/u);
+  } finally {
+    f.dispose();
+  }
+});
 
 test("oversized initial settings are rejected before creating a draft", () => {
   assert.throws(

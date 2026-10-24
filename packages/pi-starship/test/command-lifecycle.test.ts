@@ -58,7 +58,7 @@ test("session replacement disposes an open settings preview before returning", a
   }
 });
 
-test("session replacement disposes an open module browser before returning", async () => {
+test("session replacement disposes an open Configuration summary before returning", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-starship-stale-modules-"));
   const previous = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = root;
@@ -99,7 +99,7 @@ test("session replacement disposes an open module browser before returning", asy
   }
 });
 
-test("session shutdown disposes an open module browser before returning", async () => {
+test("session shutdown disposes an open Configuration summary before returning", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-starship-shutdown-modules-"));
   const previous = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = root;
@@ -316,10 +316,9 @@ test("session replacement disposes an open reload preview without applying stale
     writeFileSync(path, external);
     const command = Promise.resolve(mock.commands.get("starship")?.handler("", oldContext.ctx));
     await tui.waitForOpen();
-    for (let index = 0; index < 4; index += 1) tui.press("tui.select.down");
+    for (let index = 0; index < 3; index += 1) tui.press("tui.select.down");
     tui.press("tui.select.confirm");
     await tui.waitForOpen();
-    for (let index = 0; index < 3; index += 1) tui.press("tui.select.down");
     tui.press("tui.select.confirm");
     await tui.waitForOpen();
     assert.match(tui.render().join("\n"), /Reload preview/u);
@@ -364,10 +363,9 @@ test("session shutdown rejects a reload confirmation that resolves after ownersh
     writeFileSync(path, external);
     const command = Promise.resolve(mock.commands.get("starship")?.handler("", context.ctx));
     await tui.waitForOpen();
-    for (let index = 0; index < 4; index += 1) tui.press("tui.select.down");
+    for (let index = 0; index < 3; index += 1) tui.press("tui.select.down");
     tui.press("tui.select.confirm");
     await tui.waitForOpen();
-    for (let index = 0; index < 3; index += 1) tui.press("tui.select.down");
     tui.press("tui.select.confirm");
     await tui.waitForOpen();
     tui.press("tui.select.confirm");

@@ -16,6 +16,7 @@ import {
   showSettingsChat,
 } from "./settings-chat-ui.js";
 import { createSettingsDraft } from "./settings-draft.js";
+import { settingsSnapshots } from "./settings-snapshots.js";
 
 export async function showSettingsAgentChat(
   ctx: ExtensionCommandContext,
@@ -37,6 +38,7 @@ export async function showSettingsAgentChat(
   const draft = createSettingsDraft({
     settingsPath: options.settingsPath,
     baseline: expected.disk.rawBytes,
+    snapshots: settingsSnapshots(expected.previous, options.settingsPath, options.getInspection?.()),
     packageRoot,
     isCurrent: owner.isCurrent,
     onPreview: (loaded) => {
