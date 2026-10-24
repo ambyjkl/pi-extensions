@@ -95,6 +95,14 @@ for (const isError of [false, true]) {
       assert.deepEqual(actual, native.render(80));
       assert.ok(!actual.join("\n").includes("\x1b]52"));
       assert.doesNotMatch(actual.join("\n"), /to expand/u);
+      f.transcript.toggleTools();
+      native.setExpanded(false);
+      assert.deepEqual(f.transcript.render(80), native.render(80));
+      f.transcript.invalidate();
+      assert.deepEqual(f.transcript.render(80), native.render(80));
+      f.transcript.toggleTools();
+      native.setExpanded(true);
+      assert.deepEqual(f.transcript.render(80), native.render(80));
       assert.equal(JSON.stringify(f.agent.state.messages), original);
     } finally {
       f.transcript.dispose();

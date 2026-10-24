@@ -37,6 +37,7 @@ const CHAT_KEYS = {
   "app.clipboard.pasteImage": { defaultKeys: "ctrl+v" },
   "app.interrupt": { defaultKeys: "escape" },
   "app.exit": { defaultKeys: "ctrl+d" },
+  "app.tools.expand": { defaultKeys: "ctrl+o" },
 } as const;
 
 function fixture(
@@ -93,6 +94,53 @@ function fixture(
       setKeybindings(previousKeys);
     },
   };
+}
+
+for (const [name, configured, packet, kitty] of [
+  ["default", "ctrl+o", "\x0f", false],
+  ["remapped alias", "ctrl+return", "\x1b[13;5u", true],
+  ["modifier order", "alt+ctrl+x", "\x1b[120;7u", true],
+  ["first usable alternative", ["ctrl+", "ctrl+o"], "\x0f", false],
+] as const) {
+  test(`tool collapse uses native action routing with ${name} keys`, async () => {
+    const previousKitty = isKittyProtocolActive();
+    const keys = new KeybindingsManager(CHAT_KEYS, { "app.tools.expand": configured as never });
+    const f = fixture(undefined, keys);
+    setKittyProtocolActive(kitty);
+    try {
+      await f.tui.waitForOpen();
+      const assistant = await response(
+        [{ type: "toolCall", id: "collapse-call", name: "read", arguments: { path: "draft.toml" } }],
+        "toolUse",
+      ).result();
+      f.agent.state.messages.push(assistant, {
+        role: "toolResult",
+        toolCallId: "collapse-call",
+        toolName: "read",
+        content: [{ type: "text", text: Array.from({ length: 20 }, (_, i) => `output-${i}`).join("\n") }],
+        isError: false,
+        timestamp: 1,
+      });
+      const expanded = f.tui.render().join("\n");
+      assert.match(expanded, /output-19/u);
+      f.tui.send(packet);
+      const collapsed = f.tui.render().join("\n");
+      assert.doesNotMatch(collapsed, /output-19/u);
+      f.tui.invalidate();
+      assert.equal(f.tui.render().join("\n"), collapsed);
+      f.tui.send("\x1b[200~");
+      f.tui.send(packet);
+      assert.doesNotMatch(f.tui.render().join("\n"), /output-19/u);
+      f.tui.send("\x1b[201~");
+      f.tui.send(packet);
+      assert.match(f.tui.render().join("\n"), /output-19/u);
+      f.tui.send("\x03");
+      assert.equal(await f.running, "discard");
+    } finally {
+      setKittyProtocolActive(previousKitty);
+      await f.dispose();
+    }
+  });
 }
 
 test("editor border labels preserve native hidden-line indicators", () => {
