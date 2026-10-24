@@ -128,19 +128,8 @@ function fixture(
       tui.send("\r");
       await tui.waitForPending();
     },
-    async chooseSave(continueReview = true, shortcut = false) {
-      if (shortcut) tui.send("\x13");
-      else {
-        tui.send("\x1b");
-        await tui.waitForOpen();
-        const reviewFrame = tui.render();
-        assert.match(reviewFrame.join("\n"), /Save draft as profile/u);
-        const previewRow = reviewFrame.findIndex((line) => line.includes("LIVE FOOTER PREVIEW"));
-        assert.match(reviewFrame[previewRow - 1], /─ Preview/u);
-        assert.match(reviewFrame[previewRow + 1], /^─+$/u);
-        for (let index = 0; index < 3; index++) tui.press("tui.select.down");
-        tui.press("tui.select.confirm");
-      }
+    async chooseSave(continueReview = true) {
+      tui.send("\x13");
       await tui.waitForOpen();
       assert.match(tui.render().join("\n"), /Review draft before saving/u);
       if (continueReview) tui.press("tui.select.confirm");
@@ -235,7 +224,7 @@ test("Ctrl+S enters exact review and named profile save directly without applyin
   try {
     await f.submit();
     assert.match(f.tui.render().join("\n"), /ctrl\+s save profile/u);
-    await f.chooseSave(true, true);
+    await f.chooseSave();
     await f.running;
     assert.equal(listProfiles(f.settingsPath).length, 1);
     assert.equal(f.applied, 0);
@@ -537,31 +526,56 @@ for (const mutation of ["edit", "remove", "replace"] as const) {
   });
 }
 
-for (const screen of ["actions", "save review"] as const) {
-  test(`disposing the ${screen} cannot reopen chat or publish settings`, async () => {
-    const f = fixture();
-    let confirmed = false;
-    f.ctx.ui.confirm = async () => {
-      confirmed = true;
-      return true;
-    };
+for (const route of ["chat", "command"] as const) {
+  test(`idle Escape preserves the ${route} editor and preview without opening actions`, async () => {
+    const f = fixture(undefined, {}, route);
+    let settled = false;
+    void f.running.then(() => {
+      settled = true;
+    });
     try {
       await f.submit();
-      if (screen === "save review") await f.chooseSave(false);
-      else {
-        f.tui.send("\x1b");
-        await f.tui.waitForOpen();
-      }
-      f.tui.dispose();
-      assert.equal(await f.running, "close");
-      assert.equal(confirmed, false);
+      f.tui.type("Keep this unsent request");
+      const frame = f.tui.render();
+      assert.match(frame.join("\n"), /Keep this unsent request/u);
+      f.tui.send("\x1b");
+      await Promise.resolve();
+      assert.equal(settled, false);
+      assert.deepEqual(f.tui.render(), frame);
+      assert.match(f.previews.at(-1)?.rawDocument ?? "", /\$directory/u);
       assert.equal(f.applied, 0);
-      assert.equal(existsSync(f.draftPath ?? ""), false);
+      assert.equal(listProfiles(f.settingsPath).length, 0);
+      assert.equal(listHistory(f.settingsPath).length, 0);
+      assert.equal(readFileSync(f.settingsPath, "utf8"), "# retained\nformat = '$model'\n");
+      assert.equal(existsSync(f.draftPath ?? ""), true);
+      await f.chooseSave();
+      await f.running;
+      assert.equal(f.applied, 1);
     } finally {
       await f.dispose();
     }
   });
 }
+
+test("disposing the save review cannot reopen chat or publish settings", async () => {
+  const f = fixture();
+  let confirmed = false;
+  f.ctx.ui.confirm = async () => {
+    confirmed = true;
+    return true;
+  };
+  try {
+    await f.submit();
+    await f.chooseSave(false);
+    f.tui.dispose();
+    assert.equal(await f.running, "close");
+    assert.equal(confirmed, false);
+    assert.equal(f.applied, 0);
+    assert.equal(existsSync(f.draftPath ?? ""), false);
+  } finally {
+    await f.dispose();
+  }
+});
 
 test("child initialization failure releases the draft lease and preview", async () => {
   const f = fixture();

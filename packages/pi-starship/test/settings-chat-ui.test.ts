@@ -23,9 +23,8 @@ import { createMockContext } from "../../../test/support.js";
 import {
   createSettingsChatComponent,
   SettingsChatEditor,
-  settingsChatReviewInput,
   settingsChatSaveShortcut,
-  settingsChatTranscript,
+  settingsChatStopInput,
   showSettingsChat,
 } from "../src/settings-chat-ui.js";
 import { createSettingsDraft } from "../src/settings-draft.js";
@@ -266,7 +265,9 @@ test("chat retains native editing, expanded paste, focus, bounded framing, and s
       }
     f.tui.invalidate();
     f.tui.send("\x1b");
-    assert.equal(await f.running, "review");
+    assert.equal(f.tui.isOpen, true);
+    f.tui.send("\x13");
+    assert.equal(await f.running, "save");
     assert.equal(existsSync(join(f.root, "pi-starship.toml")), false);
   } finally {
     await f.dispose();
@@ -284,7 +285,9 @@ test("fragmented paste never triggers cancellation and preserves the unsubmitted
     f.tui.send("\x1b[201~");
     assert.equal(f.tui.isOpen, true);
     f.tui.send("\x1b");
-    assert.equal(await f.running, "review");
+    assert.equal(f.tui.isOpen, true);
+    f.tui.send("\x13");
+    assert.equal(await f.running, "save");
     assert.equal(f.state.input, "hello");
   } finally {
     await f.dispose();
@@ -332,11 +335,13 @@ for (const exit of ["escape", "hard cancel", "disposal", "owner abort"] as const
         await f.tui.waitForPending();
         assert.equal(f.tui.isOpen, true);
         f.tui.send("\x1b");
+        assert.equal(f.tui.isOpen, true);
+        f.tui.send("\x03");
       } else if (exit === "hard cancel") f.tui.send("\x03");
       else if (exit === "disposal") f.tui.dispose();
       else f.controller.abort();
       const result = await f.running;
-      assert.equal(result, exit === "escape" ? "review" : "discard");
+      assert.equal(result, "discard");
       assert.equal(aborted, true);
       assert.equal(f.agent.state.isStreaming, false);
       assert.equal(f.agent.hasQueuedMessages(), false);
@@ -488,7 +493,7 @@ test("steering precedes tool continuation; follow-up waits for natural completio
     assert.ok(!pendingRows[1].includes("Steering:"));
     assert.ok(pendingRows[1].includes("Follow-up:"));
     assert.ok(!pendingRows[3].includes("Follow-up:"));
-    assert.equal(settingsChatTranscript(f.agent).filter((line) => line.startsWith("You:")).length, 3);
+    assert.equal(f.agent.state.messages.filter((message) => message.role === "user").length, 3);
     for (const request of requests.slice(1)) {
       assert.deepEqual(request.messages.slice(0, requests[0].messages.length), requests[0].messages);
       assert.deepEqual(
@@ -540,7 +545,9 @@ for (const cancel of [false, true])
         assert.equal(requests, cancel ? 1 : 2);
         assert.equal(f.agent.hasQueuedMessages(), false);
         f.tui.send("\x1b");
-        assert.equal(await f.running, "review");
+        assert.equal(f.tui.isOpen, true);
+        f.tui.send("\x13");
+        assert.equal(await f.running, "save");
         assert.equal(f.state.input, cancel ? "late" : "");
       } finally {
         release();
@@ -584,7 +591,9 @@ for (const outcome of ["dequeue", "error", "aborted"] as const) {
       assert.equal(requests, 1);
       assert.equal(f.agent.hasQueuedMessages(), false);
       f.tui.send("\x1b");
-      assert.equal(await f.running, "review");
+      assert.equal(f.tui.isOpen, true);
+      f.tui.send("\x13");
+      assert.equal(await f.running, "save");
       assert.equal(f.state.input, `sooner\n\nlater\n\n${paste}`);
       assert.ok(!f.state.input.includes("[paste #"));
     } finally {
@@ -673,7 +682,9 @@ test("follow-up when idle submits normally, and fragmented paste never triggers 
     assert.equal(inputs.length, 1);
     assert.equal(f.agent.hasQueuedMessages(), false);
     f.tui.send("\x1b");
-    assert.equal(await f.running, "review");
+    assert.equal(f.tui.isOpen, true);
+    f.tui.send("\x13");
+    assert.equal(await f.running, "save");
     assert.equal(f.state.input, "paste\n[1;3A");
   } finally {
     await f.dispose();
@@ -759,14 +770,14 @@ for (const [name, configured, packet, kitty, expected] of [
   ["first usable fallback", "ctrl+h", "\x1b", false, true],
   ["preserve delete", "ctrl+h", "\x08", false, false],
 ] as const) {
-  test(`review key respects ${name}`, () => {
+  test(`stop key respects ${name}`, () => {
     const previous = getKeybindings();
     const previousKitty = isKittyProtocolActive();
     const keys = new KeybindingsManager(TUI_KEYBINDINGS, { "tui.select.cancel": configured as never });
     setKeybindings(keys);
     setKittyProtocolActive(kitty);
     try {
-      assert.equal(settingsChatReviewInput(packet, keys), expected);
+      assert.equal(settingsChatStopInput(packet, keys), expected);
     } finally {
       setKeybindings(previous);
       setKittyProtocolActive(previousKitty);
