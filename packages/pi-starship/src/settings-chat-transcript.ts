@@ -22,7 +22,7 @@ function displayValue<T>(value: T): T {
 }
 
 export interface SettingsChatAnchor {
-  message: AgentMessage;
+  message: AgentMessage | symbol;
   row: number;
 }
 
@@ -35,7 +35,28 @@ export function createSettingsChatTranscript(agent: Agent, tui: TUI, cwd: string
     write: createWriteToolDefinition(cwd),
     edit: createEditToolDefinition(cwd),
   };
-  let spans: Array<{ message: AgentMessage; start: number; end: number }> = [];
+  // Agent emits a new object for each partial update and another at finalization.
+  // Keep one response identity across those events, including frames with no render.
+  const identities = new WeakMap<AgentMessage, symbol>();
+  let streamingIdentity: symbol | undefined;
+  const initial = agent.state.streamingMessage;
+  if (initial?.role === "assistant") {
+    streamingIdentity = Symbol();
+    identities.set(initial, streamingIdentity);
+  }
+  const unsubscribe = agent.subscribe((event) => {
+    if (event.type === "agent_end") streamingIdentity = undefined;
+    if (
+      (event.type === "message_start" || event.type === "message_update" || event.type === "message_end") &&
+      event.message.role === "assistant"
+    ) {
+      if (event.type === "message_start") streamingIdentity = Symbol();
+      streamingIdentity ??= Symbol();
+      identities.set(event.message, streamingIdentity);
+      if (event.type === "message_end") streamingIdentity = undefined;
+    }
+  });
+  let spans: Array<{ message: AgentMessage | symbol; start: number; end: number }> = [];
   let streaming: AssistantMessageComponent | undefined;
   let disposed = false;
   return {
@@ -119,7 +140,7 @@ export function createSettingsChatTranscript(agent: Agent, tui: TUI, cwd: string
           }
           appendAssistant(message, component as AssistantMessageComponent);
         }
-        spans.push({ message, start, end: lines.length });
+        spans.push({ message: identities.get(message) ?? message, start, end: lines.length });
       }
       const partial = agent.state.streamingMessage;
       if (partial?.role === "assistant") {
@@ -128,7 +149,7 @@ export function createSettingsChatTranscript(agent: Agent, tui: TUI, cwd: string
         // Tool calls are rendered after finalization, not from incomplete streaming arguments.
         const start = lines.length;
         lines.push(...streaming.render(width));
-        spans.push({ message: partial, start, end: lines.length });
+        spans.push({ message: identities.get(partial) ?? partial, start, end: lines.length });
       } else streaming = undefined;
       for (const message of messages.keys()) if (!activeMessages.has(message)) messages.delete(message);
       for (const id of tools.keys()) if (!activeTools.has(id)) tools.delete(id);
@@ -152,7 +173,10 @@ export function createSettingsChatTranscript(agent: Agent, tui: TUI, cwd: string
       streaming = undefined;
     },
     dispose() {
+      if (disposed) return;
       disposed = true;
+      unsubscribe();
+      streamingIdentity = undefined;
       spans = [];
       messages.clear();
       tools.clear();

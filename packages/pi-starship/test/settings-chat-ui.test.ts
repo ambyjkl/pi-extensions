@@ -177,6 +177,52 @@ for (const appended of [1, 5, 30]) {
   });
 }
 
+test("history stays in the streaming response across updates and finalization", async () => {
+  const stream = createAssistantMessageEventStream();
+  const f = fixture(() => stream);
+  const text = Array.from({ length: 120 }, (_, row) => `streaming-row-${row}`).join("\n");
+  const partial = await response([{ type: "text", text }]).result();
+  let updated = () => {};
+  const unsubscribe = f.agent.subscribe((event) => {
+    if (event.type === "message_update") updated();
+  });
+  const update = async (message: typeof partial) => {
+    const ready = new Promise<void>((done) => {
+      updated = done;
+    });
+    stream.push({ type: "text_delta", contentIndex: 0, delta: "more", partial: message });
+    await ready;
+  };
+  try {
+    await f.tui.waitForOpen();
+    f.tui.type("Long response");
+    f.tui.send("\r");
+    stream.push({ type: "start", partial });
+    await update(partial);
+    f.tui.render();
+    f.tui.send("\x1b[5~");
+    const older = f.tui.render();
+    assert.match(older.join("\n"), /streaming-row-/u);
+    assert.doesNotMatch(older.join("\n"), /streaming-row-119/u);
+    const next = { ...partial, content: [{ type: "text" as const, text: `${text}\nnew tail` }] };
+    await update(next);
+    assert.deepEqual(f.tui.render(), older);
+    stream.push({ type: "done", reason: "stop", message: { ...next } });
+    await f.tui.waitForPending();
+    // The editor status changes at settlement; the transcript rows must not move.
+    assert.deepEqual(f.tui.render().slice(0, 20), older.slice(0, 20));
+    for (let index = 0; index < 10; index++) {
+      f.tui.send("\x1b[6~");
+      f.tui.render();
+    }
+    assert.match(f.tui.render().join("\n"), /new tail/u);
+  } finally {
+    stream.end(partial);
+    unsubscribe();
+    await f.dispose();
+  }
+});
+
 test("editor border labels preserve native hidden-line indicators", () => {
   class NativeEditor extends Editor {
     borders(width: number, hidden: number) {

@@ -321,6 +321,8 @@ export function createSettingsChatComponent(options: {
   const render = () => {
     if (!disposed && !signal.aborted) tui.requestRender();
   };
+  // Update transcript identities before this listener requests the next frame.
+  const transcript = createSettingsChatTranscript(agent, tui, draft.directory);
   const unsubscribe = agent.subscribe((event) => {
     if (event.type === "message_start") {
       const index = queued.findIndex((item) => item.message === event.message);
@@ -347,7 +349,6 @@ export function createSettingsChatComponent(options: {
   };
   signal.addEventListener("abort", abort, { once: true });
   const rule = new HorizontalRule({ ruleStyle: (text) => theme.fg("border", text) });
-  const transcript = createSettingsChatTranscript(agent, tui, draft.directory);
   const failed = () => {
     const last = agent.state.messages.at(-1);
     return last?.role === "assistant" && (last.stopReason === "error" || last.stopReason === "aborted");
