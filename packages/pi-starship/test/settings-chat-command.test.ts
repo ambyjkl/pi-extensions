@@ -223,7 +223,7 @@ test("Ctrl+S enters exact review and named profile save directly without applyin
   };
   try {
     await f.submit();
-    assert.match(f.tui.render().join("\n"), /ctrl\+s save profile/u);
+    assert.match(f.tui.render().join("\n"), /ctrl\+s to save profile/u);
     await f.chooseSave();
     await f.running;
     assert.equal(listProfiles(f.settingsPath).length, 1);
