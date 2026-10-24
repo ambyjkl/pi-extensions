@@ -60,6 +60,32 @@ test("user and assistant blocks exactly reuse native Markdown, backgrounds, padd
   }
 });
 
+test("message anchors retain exact rows through eviction and invalidation", () => {
+  const f = fixture(
+    Array.from({ length: 30 }, (_, index) => ({
+      role: "user" as const,
+      content: Array.from({ length: (index % 5) + 1 }, (_, row) => `message-${index}-row-${row}`).join("\n"),
+      timestamp: index,
+    })),
+  );
+  try {
+    const before = f.transcript.render(80);
+    const anchors = before.map((line, row) => ({ line, anchor: f.transcript.anchorAt(row) }));
+    f.agent.state.messages.push({ role: "user", content: "new message", timestamp: 30 });
+    f.transcript.invalidate();
+    const after = f.transcript.render(80);
+    for (const { line, anchor } of anchors) {
+      assert.ok(anchor);
+      if (anchor.message === f.agent.state.messages[0]) assert.equal(f.transcript.rowAt(anchor), 0);
+      else if (anchor.row >= 0) assert.equal(after[f.transcript.rowAt(anchor)], line);
+    }
+    f.transcript.dispose();
+    assert.equal(f.transcript.anchorAt(0), undefined);
+  } finally {
+    f.transcript.dispose();
+  }
+});
+
 for (const isError of [false, true]) {
   test(`tool ${isError ? "error" : "success"} uses native tool framing without changing raw arguments or results`, async () => {
     const unsafe = "\x1b]52;c;secret\x07";
@@ -181,6 +207,107 @@ test("streaming replies use the native assistant block and become one finalized 
     transcript.dispose();
     assert.deepEqual(transcript.render(80), []);
   }
+});
+
+for (const reason of ["stop", "error", "aborted"] as const) {
+  test(`streaming anchors survive object replacement, invalidation, and ${reason} finalization`, async () => {
+    let stream = createAssistantMessageEventStream();
+    const agent = new Agent({ initialState: { model: { ...testModel, input: ["text"] } }, streamFn: () => stream });
+    const tui = { terminal: { rows: 24, columns: 80 }, requestRender() {} } as TUI;
+    let transcript = createSettingsChatTranscript(agent, tui, cwd);
+    const text = Array.from({ length: 120 }, (_, row) => `stream-row-${row}`).join("\n");
+    const partial = await response([{ type: "text", text }]).result();
+    const update = async (message: typeof partial) => {
+      let unsubscribe = () => {};
+      const updated = new Promise<void>((done) => {
+        unsubscribe = agent.subscribe((event) => {
+          if (event.type === "message_update") done();
+        });
+      });
+      try {
+        stream.push({ type: "text_delta", contentIndex: 0, delta: "more", partial: message });
+        await updated;
+      } finally {
+        unsubscribe();
+      }
+    };
+    let running = agent.prompt("Streaming question");
+    try {
+      stream.push({ type: "start", partial });
+      await update(partial);
+      if (reason === "error") {
+        // A transcript can also be attached after a response has started.
+        transcript.dispose();
+        transcript = createSettingsChatTranscript(agent, tui, cwd);
+      }
+      const first = agent.state.streamingMessage;
+      const lines = transcript.render(80);
+      const row = lines.findIndex((line) => line.includes("stream-row-54"));
+      assert.ok(row > 0);
+      const anchor = transcript.anchorAt(row);
+      assert.ok(anchor);
+      const next = { ...partial, content: [{ type: "text" as const, text: `${text}\nnew tail` }] };
+      await update(next);
+      assert.notEqual(agent.state.streamingMessage, first);
+      transcript.invalidate();
+      const updated = transcript.render(80);
+      assert.equal(transcript.rowAt(anchor), row);
+      assert.equal(updated[transcript.rowAt(anchor)], lines[row]);
+      // Finalization can arrive with no render of the last partial object.
+      await update({ ...next });
+      const final = { ...next, stopReason: reason };
+      stream.push(
+        reason === "stop" ? { type: "done", reason, message: final } : { type: "error", reason, error: final },
+      );
+      await running;
+      const finalized = transcript.render(80);
+      assert.equal(transcript.rowAt(anchor), row);
+      assert.equal(finalized[transcript.rowAt(anchor)], lines[row]);
+      if (reason === "stop") {
+        // A later response must not reuse this identity, even with the same timestamp.
+        stream = createAssistantMessageEventStream();
+        running = agent.prompt("Next response");
+        stream.push({ type: "start", partial });
+        await update(partial);
+        const secondLines = transcript.render(80);
+        const secondAnchor = transcript.anchorAt(secondLines.length - 5);
+        assert.ok(secondAnchor);
+        assert.notEqual(secondAnchor.message, anchor.message);
+        stream.push({ type: "done", reason: "stop", message: { ...partial } });
+        await running;
+      }
+    } finally {
+      stream.end(partial);
+      await running;
+      transcript.dispose();
+      transcript.dispose();
+    }
+  });
+}
+
+test("transcript disposal releases its identity listener once", () => {
+  const agent = new Agent({
+    initialState: { model: { ...testModel, input: ["text"] } },
+    streamFn: () => response([]),
+  });
+  const subscribe = agent.subscribe.bind(agent);
+  let active = 0;
+  agent.subscribe = (listener) => {
+    active += 1;
+    const unsubscribe = subscribe(listener);
+    return () => {
+      active -= 1;
+      unsubscribe();
+    };
+  };
+  const tui = { terminal: { rows: 24, columns: 80 }, requestRender() {} } as TUI;
+  const transcript = createSettingsChatTranscript(agent, tui, cwd);
+  assert.equal(active, 1);
+  transcript.invalidate();
+  assert.equal(active, 1);
+  transcript.dispose();
+  transcript.dispose();
+  assert.equal(active, 0);
 });
 
 test("native error-only assistant messages retain error styling and sanitized display payloads", async () => {

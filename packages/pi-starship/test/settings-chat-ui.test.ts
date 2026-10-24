@@ -96,8 +96,54 @@ function fixture(
   };
 }
 
+for (const remapped of [false, true]) {
+  test(`chat history supports paging and wheel scrolling with ${remapped ? "custom" : "default"} keys`, async () => {
+    const keys = new KeybindingsManager(
+      CHAT_KEYS,
+      remapped
+        ? {
+            "tui.editor.pageUp": "ctrl+alt+u",
+            "tui.editor.pageDown": "ctrl+alt+d",
+          }
+        : {},
+    );
+    const f = fixture(undefined, keys);
+    try {
+      await f.tui.waitForOpen();
+      f.agent.state.messages.push({
+        role: "user",
+        content: Array.from({ length: 120 }, (_, i) => `history-${i.toString().padStart(3, "0")}`).join("\n"),
+        timestamp: 0,
+      });
+      const bottom = f.tui.render().join("\n");
+      assert.match(bottom, /history-119/u);
+      f.tui.type("keep this draft");
+      f.tui.send(remapped ? "\x1b[117;7u" : "\x1b[5~");
+      const older = f.tui.render().join("\n");
+      assert.doesNotMatch(older, /history-119/u);
+      assert.match(older, /keep this draft/u);
+      f.agent.state.messages.push({ role: "user", content: "new-tail", timestamp: 1 });
+      assert.equal(f.tui.render().join("\n"), older);
+      f.tui.mouse({ type: "wheel", x: 1, y: 1, wheelDelta: -1 });
+      assert.notEqual(f.tui.render().join("\n"), older);
+      for (let i = 0; i < 10; i++) f.tui.send(remapped ? "\x1b[100;7u" : "\x1b[6~");
+      assert.match(f.tui.render().join("\n"), /new-tail/u);
+      for (const width of [1, 20, 80]) {
+        const frame = f.tui.render(width);
+        assert.ok(frame.every((line) => visibleWidth(line) <= width));
+      }
+      f.tui.send("\x03");
+      assert.equal(await f.running, "discard");
+      assert.equal(f.state.input, "keep this draft");
+    } finally {
+      await f.dispose();
+    }
+  });
+}
+
 for (const [name, configured, packet, kitty] of [
   ["default", "ctrl+o", "\x0f", false],
+  ["paging collision", "pageUp", "\x1b[5~", false],
   ["remapped alias", "ctrl+return", "\x1b[13;5u", true],
   ["modifier order", "alt+ctrl+x", "\x1b[120;7u", true],
   ["first usable alternative", ["ctrl+", "ctrl+o"], "\x0f", false],
@@ -142,6 +188,88 @@ for (const [name, configured, packet, kitty] of [
     }
   });
 }
+
+for (const appended of [1, 5, 30]) {
+  test(`history keeps retained content stable after ${appended} message evictions`, async () => {
+    const f = fixture();
+    const message = (index: number) => ({
+      role: "user" as const,
+      content: Array.from({ length: 4 }, (_, row) => `message-${index}-row-${row}`).join("\n"),
+      timestamp: index,
+    });
+    try {
+      await f.tui.waitForOpen();
+      f.agent.state.messages.push(...Array.from({ length: 30 }, (_, index) => message(index)));
+      f.tui.render();
+      f.tui.send("\x1b[5~");
+      const older = f.tui.render();
+      assert.doesNotMatch(older.join("\n"), /message-29-row-3/u);
+      f.agent.state.messages.push(...Array.from({ length: appended }, (_, index) => message(30 + index)));
+      const after = f.tui.render();
+      if (appended < 30) assert.deepEqual(after, older);
+      else {
+        // The anchor itself is gone. Show the oldest retained message, not a later one.
+        assert.match(after.join("\n"), /message-30-row-0/u);
+        assert.doesNotMatch(after.join("\n"), /message-59-row-3/u);
+      }
+      for (let index = 0; index < 20; index++) {
+        f.tui.send("\x1b[6~");
+        f.tui.render();
+      }
+      assert.match(f.tui.render().join("\n"), new RegExp(`message-${29 + appended}-row-3`, "u"));
+      f.agent.state.messages.push(message(30 + appended));
+      assert.match(f.tui.render().join("\n"), new RegExp(`message-${30 + appended}-row-3`, "u"));
+    } finally {
+      await f.dispose();
+    }
+  });
+}
+
+test("history stays in the streaming response across updates and finalization", async () => {
+  const stream = createAssistantMessageEventStream();
+  const f = fixture(() => stream);
+  const text = Array.from({ length: 120 }, (_, row) => `streaming-row-${row}`).join("\n");
+  const partial = await response([{ type: "text", text }]).result();
+  let updated = () => {};
+  const unsubscribe = f.agent.subscribe((event) => {
+    if (event.type === "message_update") updated();
+  });
+  const update = async (message: typeof partial) => {
+    const ready = new Promise<void>((done) => {
+      updated = done;
+    });
+    stream.push({ type: "text_delta", contentIndex: 0, delta: "more", partial: message });
+    await ready;
+  };
+  try {
+    await f.tui.waitForOpen();
+    f.tui.type("Long response");
+    f.tui.send("\r");
+    stream.push({ type: "start", partial });
+    await update(partial);
+    f.tui.render();
+    f.tui.send("\x1b[5~");
+    const older = f.tui.render();
+    assert.match(older.join("\n"), /streaming-row-/u);
+    assert.doesNotMatch(older.join("\n"), /streaming-row-119/u);
+    const next = { ...partial, content: [{ type: "text" as const, text: `${text}\nnew tail` }] };
+    await update(next);
+    assert.deepEqual(f.tui.render(), older);
+    stream.push({ type: "done", reason: "stop", message: { ...next } });
+    await f.tui.waitForPending();
+    // The editor status changes at settlement; the transcript rows must not move.
+    assert.deepEqual(f.tui.render().slice(0, 20), older.slice(0, 20));
+    for (let index = 0; index < 10; index++) {
+      f.tui.send("\x1b[6~");
+      f.tui.render();
+    }
+    assert.match(f.tui.render().join("\n"), /new tail/u);
+  } finally {
+    stream.end(partial);
+    unsubscribe();
+    await f.dispose();
+  }
+});
 
 test("editor border labels preserve native hidden-line indicators", () => {
   class NativeEditor extends Editor {
