@@ -331,6 +331,36 @@ test("composer import preserves an expanded large-paste draft, renders updates, 
   tui.dispose();
 });
 
+test("composer keeps the import hint last in full and compact layouts", async () => {
+  initTheme("dark");
+  const harness = createTuiHarness({ width: 160, rows: 24 });
+  const keys = new KeybindingsManager({ ...TUI_KEYBINDINGS, "app.thinking.cycle": { defaultKeys: "shift+tab" } });
+  let pager!: BtwTranscriptPager;
+  const pending = harness.custom((tui, theme, _keys, done) => {
+    pager = new BtwTranscriptPager(tui, theme, [], done, {
+      mainUpdates: () => false,
+      keybindings: keys,
+      thinking: { level: "off", levels: ["off", "low"], keybindings: keys, onChange() {} },
+    });
+    pager.setWorkspaceFocus("side", "F6");
+    return pager;
+  });
+  await harness.waitForOpen();
+  const full = pager
+    .render(160)
+    .map(stripVTControlCharacters)
+    .find((line) => line.includes("F9 import"));
+  const compact = pager
+    .render(40)
+    .map(stripVTControlCharacters)
+    .find((line) => line.includes("F9 import"));
+  pager.dispose();
+  await pending;
+  harness.dispose();
+  assert.equal(full, "Enter send • Ctrl+C exit • Shift+Tab thinking • F6 switch • F9 import main");
+  assert.equal(compact, "Enter • Ctrl+C • F9 import");
+});
+
 test("busy view does not expose import or disturb the steering queue", async () => {
   initTheme("dark");
   const harness = createTuiHarness({ width: 120, rows: 24 });

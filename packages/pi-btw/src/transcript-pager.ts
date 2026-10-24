@@ -443,17 +443,17 @@ export class BtwTranscriptPager implements BtwFullscreenLayoutComponent, Focusab
     return fittingHint(width, [
       compactHints([
         submit,
-        importHint,
         bring ? `${bringKey} bring to main` : "",
         `${exit} exit`,
         cycle,
         history,
         switchPane,
+        importHint,
       ]),
       ...(compactImportHint
         ? [
-            compactHints([submit, compactImportHint, bring ? bringKey : "", exit, cycle, history, switchPane]),
-            compactHints([submitKey, compactImportHint, exit]),
+            compactHints([submit, bring ? bringKey : "", exit, cycle, history, switchPane, compactImportHint]),
+            compactHints([submitKey, exit, compactImportHint]),
           ]
         : []),
       compactHints([submit, bring ? bringKey : "", exit, cycle, history, switchPane]),
