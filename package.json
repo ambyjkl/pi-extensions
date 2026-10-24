@@ -118,7 +118,9 @@
       "sprintf-js": "npm:@lvcabral/sprintf@1.2.2"
     },
     "node-domexception": "npm:@profoundlogic/node-domexception@1.0.2",
-    "protobufjs": "7.6.5"
+    "protobufjs": "7.6.5",
+    "undici@7": "7.30.1",
+    "undici@8": "8.12.3"
   },
   "allowScripts": {
     "esbuild@0.28.2": true,
