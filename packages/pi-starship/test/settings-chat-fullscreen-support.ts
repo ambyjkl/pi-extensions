@@ -132,6 +132,7 @@ export function createFullscreenHarness(mode: "regular" | "fullscreen" = "regula
 }
 
 export async function fullscreenMounted(): Promise<void> {
-  // Pi mounts the custom overlay, then the host transfers ownership.
-  for (let turn = 0; turn < 6; turn++) await Promise.resolve();
+  // Let mount and resolved native-drain continuations finish in this event-loop
+  // turn. Explicit drain gates still block transfer; no fixed sleep is needed.
+  await new Promise<void>((resolve) => setImmediate(resolve));
 }

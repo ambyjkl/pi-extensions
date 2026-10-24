@@ -85,6 +85,112 @@ function component(): Component {
 }
 
 describe("settings chat native fullscreen host", () => {
+  it.each(["regular", "fullscreen"] as const)("waits for the %s parent entry drain before transfer", async (mode) => {
+    const f = fixture(mode);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const drain = vi.fn(() => gate);
+    f.terminal.drain = drain;
+    const task = f.run();
+    try {
+      await fullscreenMounted();
+      expect(drain).toHaveBeenCalledOnce();
+      expect(f.create).not.toHaveBeenCalled();
+      expect(f.terminal.events.map((event) => event.name)).toEqual(["start", "drain"]);
+      f.terminal.input("pending parent input");
+      expect(f.input).not.toHaveBeenCalled();
+      release();
+      await fullscreenMounted();
+      expect(f.create).toHaveBeenCalledOnce();
+      f.terminal.input("child input");
+      expect(f.input).toHaveBeenCalledExactlyOnceWith("child input");
+      expect(f.terminal.events.every((event) => event.depth === 0)).toBe(true);
+    } finally {
+      f.terminal.drain = () => Promise.resolve();
+      release();
+      f.controller.abort();
+      await task;
+    }
+  });
+
+  it.each(["owner", "context", "dispose", "stale", "shutdown"] as const)(
+    "joins entry drain on %s cancellation without creating a child",
+    async (reason) => {
+      const f = fixture();
+      const input = vi.fn();
+      const editor = { ...component(), handleInput: input };
+      f.parent.addChild(editor);
+      f.parent.setFocus(editor);
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      f.terminal.drain = () => gate;
+      let settled = false;
+      const task = f.run().finally(() => {
+        settled = true;
+      });
+      try {
+        await fullscreenMounted();
+        expect(f.create).not.toHaveBeenCalled();
+        if (reason === "owner") f.controller.abort();
+        else if (reason === "context") f.contextController.abort();
+        else if (reason === "dispose") f.harness.disposeCustom();
+        else {
+          f.replaceSession();
+          if (reason === "stale") f.owner.canRestoreTerminal = () => true;
+        }
+        await fullscreenMounted();
+        expect(settled).toBe(false);
+        expect(f.create).not.toHaveBeenCalled();
+        expect(f.terminal.events.map((event) => event.name)).toEqual(["start", "drain"]);
+        release();
+        await expect(task).resolves.toBe("cancelled");
+        expect(f.create).not.toHaveBeenCalled();
+        if (reason === "shutdown") expect(f.terminal.onInput).toBeUndefined();
+        else {
+          f.terminal.input("restored parent input");
+          expect(input).toHaveBeenCalledExactlyOnceWith("restored parent input");
+          // A native drain changes keyboard protocols. Restart even when no child
+          // was created, so cancellation does not leave the parent in drain mode.
+          expect(f.terminal.events.map((event) => event.name)).toEqual(["start", "drain", "stop", "start"]);
+        }
+      } finally {
+        release();
+        f.controller.abort();
+        await task;
+      }
+    },
+  );
+
+  it("reports entry drain failure and restores parent input without creating a child", async () => {
+    const f = fixture();
+    const input = vi.fn();
+    const editor = { ...component(), handleInput: input };
+    f.parent.addChild(editor);
+    f.parent.setFocus(editor);
+    f.terminal.drain = () => Promise.reject(new Error("entry drain failed"));
+    await expect(f.run()).rejects.toThrow("entry drain failed");
+    expect(f.create).not.toHaveBeenCalled();
+    expect(f.terminal.events.map((event) => event.name)).toEqual(["start", "drain", "stop", "start"]);
+    f.terminal.input("parent input after failure");
+    expect(input).toHaveBeenCalledExactlyOnceWith("parent input after failure");
+  });
+
+  it("uses callback-unwind handoff when no native drain is available", async () => {
+    const f = fixture();
+    Object.defineProperty(f.terminal, "drainInput", { value: undefined });
+    const task = f.run();
+    await fullscreenMounted();
+    expect(f.create).toHaveBeenCalledOnce();
+    f.options.complete("saved");
+    await expect(task).resolves.toBe("saved");
+    expect(f.terminal.events.some((event) => event.name === "drain")).toBe(false);
+    expect(f.terminal.events.every((event) => event.depth === 0)).toBe(true);
+  });
+
   it.each([false, true])("restores input before joining cancelled root work; failure=%s", async (fail) => {
     const f = fixture();
     let release!: () => void;
@@ -381,7 +487,6 @@ describe("settings chat native fullscreen host", () => {
         f.dispose.mockImplementation(() => {
           throw error;
         });
-      if (stage === "drain") f.terminal.drain = () => Promise.reject(error);
       const task = f.run({
         createTui: (_parent, createDefault) => {
           if (stage === "constructor") throw error;
@@ -407,6 +512,7 @@ describe("settings chat native fullscreen host", () => {
       const observed = expect(task).rejects.toThrow(error);
       await fullscreenMounted();
       if (["dispose", "stop", "drain", "restore"].includes(stage)) {
+        if (stage === "drain") f.terminal.drain = () => Promise.reject(error);
         if (stage === "restore")
           vi.spyOn(f.parent, "start").mockImplementation(() => {
             throw error;

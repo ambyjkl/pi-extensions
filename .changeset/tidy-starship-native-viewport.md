@@ -2,7 +2,7 @@
 "@narumitw/pi-starship": minor
 ---
 
-Move configuration chat to a Starship-owned `TuiAltScreen` with native `ScrollView` history and a fixed editor/preview dock. Suspend the parent TUI while the chat owns the shared terminal and restore ownership before review and save screens.
+Move configuration chat to a Starship-owned `TuiAltScreen` with native `ScrollView` history and a fixed editor/preview dock. Suspend the parent TUI while the chat owns the shared terminal and restore ownership before review and save screens. Await native input drain before entering the chat and before returning to the parent. Recheck ownership after entry drain, join cancelled entry work, and restore keyboard protocols if entry is cancelled or fails.
 
 History paging now uses `tui.altScreen.pageUp` and `tui.altScreen.pageDown` instead of `tui.editor.pageUp` and `tui.editor.pageDown`; move custom history paging bindings to the viewport actions. Agent behavior, draft permissions, and settings/profile storage are unchanged.
 

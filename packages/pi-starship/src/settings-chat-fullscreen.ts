@@ -72,6 +72,8 @@ export async function runSettingsChatFullscreen<Value>(
         let component: SettingsChatFullscreenComponent | undefined;
         let overlay: OverlayHandle | undefined;
         let parentStopped = false;
+        let entry: Promise<void> | undefined;
+        let entryDrainStarted = false;
         let finished = false;
         let closing = false;
         let cleanup: Promise<void> | undefined;
@@ -94,12 +96,21 @@ export async function runSettingsChatFullscreen<Value>(
           // Root work must stop synchronously, even when a nested overlay has focus.
           controller.abort();
           cleanup = Promise.resolve().then(async () => {
+            // Do not stop the terminal or start a second drain while entry still
+            // owns the native drain. Its finally block restores the input handler.
+            await entry;
             if (parentStopped) {
               try {
                 await parent.terminal.drainInput?.();
               } catch (error) {
                 errors.push(error);
               }
+            }
+            if (entryDrainStarted && !parentStopped) {
+              // Native drain disables keyboard protocols even if entry is then
+              // cancelled or fails. Reset them through the normal stop/start path.
+              parentStopped = true;
+              attempt(() => parent.stop({ preserveScreen: true }));
             }
             for (const remove of removers.splice(0)) attempt(remove);
             attempt(() => component?.dispose?.());
@@ -186,37 +197,47 @@ export async function runSettingsChatFullscreen<Value>(
           // terminal ownership changes. onHandle runs only after Pi mounts host.
           queueMicrotask(() => {
             if (closing) return;
-            try {
-              if (!current()) {
-                cancel();
-                return;
+            entry = (async () => {
+              try {
+                if (!current()) {
+                  cancel();
+                  return;
+                }
+                entryDrainStarted = parent.terminal.drainInput !== undefined;
+                await parent.terminal.drainInput?.();
+                if (closing) return;
+                if (!current()) {
+                  cancel();
+                  return;
+                }
+                parentStopped = true;
+                parent.stop({ preserveScreen: true });
+                if (closing) return;
+                const createDefault = () =>
+                  new SettingsChatTui(parent.terminal, parent.getShowHardwareCursor(), undefined, { mouse: true });
+                child = dependencies.createTui?.(parent, createDefault) ?? createDefault();
+                if (child instanceof SettingsChatTui) child.guard = guard;
+                else removers.push(child.addInputListener(guard));
+                component = create({
+                  tui: child,
+                  theme,
+                  keybindings,
+                  signal: controller.signal,
+                  complete: (value) => finish({ value }),
+                });
+                if (closing) return;
+                if (!current()) {
+                  cancel();
+                  return;
+                }
+                child.setLayoutRoot(component.getFullscreenLayout?.() ?? component);
+                child.setFocus(component);
+                child.start();
+              } catch (error) {
+                if (closing) errors.push(error);
+                else finish({ error });
               }
-              parentStopped = true;
-              parent.stop({ preserveScreen: true });
-              const createDefault = () =>
-                new SettingsChatTui(parent.terminal, parent.getShowHardwareCursor(), undefined, { mouse: true });
-              child = dependencies.createTui?.(parent, createDefault) ?? createDefault();
-              if (child instanceof SettingsChatTui) child.guard = guard;
-              else removers.push(child.addInputListener(guard));
-              component = create({
-                tui: child,
-                theme,
-                keybindings,
-                signal: controller.signal,
-                complete: (value) => finish({ value }),
-              });
-              if (closing) return;
-              if (!current()) {
-                cancel();
-                return;
-              }
-              child.setLayoutRoot(component.getFullscreenLayout?.() ?? component);
-              child.setFocus(component);
-              child.start();
-            } catch (error) {
-              if (closing) errors.push(error);
-              else finish({ error });
-            }
+            })();
           });
         };
         if (!current()) cancel();

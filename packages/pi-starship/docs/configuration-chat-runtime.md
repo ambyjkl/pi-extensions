@@ -42,7 +42,9 @@ flowchart TD
 The lifecycle acceptance rules are:
 
 - Cancel the owning root flow synchronously on Ctrl+C, including when a nested overlay has focus, and consume that input.
-- Wait for the terminal's input-drain boundary, or for the active callback to finish when no drain boundary is available, before physical stop/start operations.
+- Wait for the terminal's input-drain boundary on both entry and exit, or for the active callback to finish when no drain boundary is available, before physical stop/start operations.
+  - After the entry drain, recheck cancellation and ownership before creating the child.
+  - On entry cancellation or failure, join that drain before cleanup. Reset the live parent's keyboard protocols through stop/start even if no child was created.
 - Deliver the next separately dispatched input through the restored TUI's normal input pipeline.
   - Do not promise replay of bytes already combined with the handoff key in the same raw input dispatch.
 - Make cleanup safe after repeated calls, initialization failure, cancellation, disposal, and cleanup failure.
@@ -68,11 +70,11 @@ Native edit previews read files before tool execution. The chat therefore enable
 The implementation was verified on Linux with Node.js 26.11.1, installed Pi Coding Agent/TUI/Agent Core/AI 1.3.0, and Starship's Kit resolution 0.66.0. Versions were read from installed manifests and `npm ls`; other installed Kit copies are not Starship's resolution.
 
 - API review: uses public `TuiAltScreen`, `ScrollView`, `VStack`, `setLayoutRoot`, focus, input-listener, terminal drain, stop/start, and owned overlay APIs. No private layout access or extension-to-extension dependency is used. The first registered listener protects hard cancellation and paste before native viewport actions.
-- Native-dispatch tests cover wheel, default/remapped viewport keys, aliases, modifier order, legacy/Kitty differences, invalid keys and alternatives, paste ownership under native search, root/nested hard cancellation, drain gates, first restored input, unrelated overlays, initialization/cleanup errors, and repeated cleanup.
+- Native-dispatch tests cover wheel, default/remapped viewport keys, aliases, modifier order, legacy/Kitty differences, invalid keys and alternatives, paste ownership under native search, root/nested hard cancellation, entry/exit drain gates, first restored input, unrelated overlays, initialization/cleanup errors, and repeated cleanup. Entry tests cover both parent modes, cancellation/disposal/replacement/shutdown while waiting, drain rejection, and a terminal without a drain API.
 - Transcript tests cover streaming finalization, retention eviction, reflow with Markdown decoration, same-message tool collapse/expansion, dock-height changes, and temporary content fit without accidental follow-end resumption. If anchored output is removed, the view uses a bounded retained position; an evicted message falls back to the oldest retained content.
 - Existing agent, editor, draft, preview, review, profile, apply, conflict, and non-TUI tests pass. Editor parity tests are component tests; native-dispatch tests establish viewport precedence. Tool lifecycle tests compare frames with actual native components for read/write/edit, partial arguments/results, out-of-order completions, errors/abort, and authoritative edit diffs. Preview tests cover incomplete/denied paths, relative/alias paths, invalidation, and late completion after disposal. Native UI tests cover parent-derived expansion, local review state, and click routing through the scroll viewport.
 - The generated-entry Jiti smoke exercises the real lazy chat chunk, native paging and wheel, cancellation, session-tree restoration, and the actual `session_shutdown` hook with a gated terminal drain.
-- Root `npm run check` passed. Root `npm test` passed: 14,882 tests passed, 2 existing tests skipped, no unhandled errors.
+- Root `npm run check` passed. Root `npm test` passed: 14,891 tests passed, 2 existing tests skipped, no unhandled errors.
 - Starship build, `npm run package:pack -- starship`, and a separate actual tarball inspection passed. The artifact contains the declared `dist/index.ts`, chat chunks, source, bundled skill, README, and notices. Builder tests validate exact emitted relative imports and lazy boundaries.
 - The isolated Unix PTY smoke passed with regular and fullscreen parents: package-directory CLI loading, deterministic write/edit/read tool calls and the native completed edit diff, long history, native paging and wheel, Ctrl+C discard, the first separate restored-parent command, and graceful shutdown. No live model/provider request was made. The harness waits for a parent-start handshake before testing restored input; alt-screen exit alone is earlier than restoration.
 - Physical terminal wheel behavior, IME candidate placement, other operating systems, and other Pi runtime versions remain unverified. No live-provider smoke was needed.
