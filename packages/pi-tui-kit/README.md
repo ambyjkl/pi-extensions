@@ -82,7 +82,7 @@ Optional full-source Copy has two convergent consumer contracts: Starship raw/ef
 Masked secret entry uses the same pre-adoption exception for Sync's required credentials and Langfuse's optional blank-to-keep key flow.
 The shared API owns only a masked TUI draft and typed lifecycle result; credential validation, storage, and setup policy remain consumer-owned.
 RPC has no masked input field, so `runSecretInput()` returns `unsupported` without opening `ctx.ui.input()`.
-This release leaves both consumers unchanged until the Kit API is published, and a later Langfuse migration must explicitly resolve its existing plaintext RPC setup behavior.
+Sync now adopts the published control while retaining its credential policy and unfinished-paste hard cancellation. Langfuse remains unchanged; its migration must explicitly resolve the existing plaintext RPC setup behavior.
 
 The public Mermaid Markdown transformer uses the same pre-adoption rule for `pi-btw` side-thread transcripts.
 This release exposes and verifies the Kit API without changing that extension; `pi-btw` can raise its Kit floor only after this API is published.
@@ -90,9 +90,9 @@ This release exposes and verifies the Kit API without changing that extension; `
 Standalone document review and multi-select are maintainer-requested pre-adoption APIs over existing standard-screen behavior.
 They add lifecycle and mode adapters without exposing component factories; this release does not migrate consumers or move domain state and persistence into Kit.
 
-Frame row metadata and configured-key canonicalization are prepared for the convergent Progress/Subagents frame wrappers and BTW/Notes configured-key syntax.
-Consumers keep their current implementations until the new Kit APIs are published; protocol-overlap, global shortcut availability, and a second paste parser remain deferred.
-The [native alignment audit](./docs/core-alignment-audit.md#shared-helper-alignment) records the API decisions and publication-dependent follow-up.
+Progress and Subagents use published frame row metadata; Notes and Ticker share configured-key syntax without sharing input policy. Usage uses Kit interaction ownership while retaining its native settings and save queue.
+The [consumer consolidation audit](./docs/ui-consolidation-audit.md) records compatibility, registry evidence, verification, and the blocked BTW migration. Protocol-overlap, global shortcut availability, and a second paste parser remain deferred.
+The [native alignment audit](./docs/core-alignment-audit.md#shared-helper-alignment) records the original API decisions.
 
 Kit screens follow Pi's fullscreen input ownership rather than replacing its transcript controls.
 See [Fullscreen input and custom UI limits](./docs/api.md#fullscreen-input-and-custom-ui-limits) for paging, overlay focus, and program-status constraints.

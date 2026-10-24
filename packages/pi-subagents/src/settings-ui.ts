@@ -1,15 +1,12 @@
 import { stripVTControlCharacters } from "node:util";
 import { type ExtensionCommandContext, getSettingsListTheme } from "@earendil-works/pi-coding-agent";
+import { Key, matchesKey, type SettingItem, SettingsList, Text, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import {
-  Key,
-  matchesKey,
-  type SettingItem,
-  SettingsList,
-  Text,
-  type TuiMouseEvent,
-  truncateToWidth,
-} from "@earendil-works/pi-tui";
-import { HorizontalRule, renderBoundedFrame, runCustomInteraction, sanitizeTerminalText } from "@narumitw/pi-tui-kit";
+  HorizontalRule,
+  renderBoundedFrameLayout,
+  runCustomInteraction,
+  sanitizeTerminalText,
+} from "@narumitw/pi-tui-kit";
 import type { SubagentSettings } from "./settings.js";
 
 interface SubagentSettingsUIOptions {
@@ -140,30 +137,21 @@ export async function showSubagentSettings(
           contentHeight = content.length;
           const focusedRow = content.findIndex((line) => stripVTControlCharacters(line).startsWith("→"));
           mouseRows.clear();
-          const tokens = new Map<string, number>();
-          const layout = content.map((line, index) => {
-            if (!stripVTControlCharacters(line).trim()) return line;
-            const token = `content:${index}`;
-            tokens.set(token, index);
-            return token;
-          });
+
           const terminalRows = Number.isFinite(tui.terminal.rows) ? Math.floor(tui.terminal.rows) : 24;
-          const frame = renderBoundedFrame({
-            width: Math.max(renderedWidth, `content:${content.length}`.length),
+          const frame = renderBoundedFrameLayout({
+            width: renderedWidth,
             maxRows: Math.max(1, terminalRows - 3),
             rule: rule.render(renderedWidth)[0] ?? "",
             title: new Text(theme.fg("accent", theme.bold("Subagents Settings")), 0, 0).render(renderedWidth),
             context: [theme.fg("muted", "Saved changes apply immediately.")],
-            content: layout,
+            content,
             hints: new Text(theme.fg("muted", "Ctrl+C close"), 0, 0).render(renderedWidth),
             priorityRows: focusedRow < 0 ? [] : [focusedRow],
             focusedRow,
           });
-          return frame.map((line, row) => {
-            const nativeRow = tokens.get(line);
-            if (nativeRow !== undefined) mouseRows.set(row, nativeRow);
-            return truncateToWidth(nativeRow === undefined ? line : (content[nativeRow] ?? ""), renderedWidth, "");
-          });
+          for (const { frameIndex, contentIndex } of frame.contentRows) mouseRows.set(frameIndex, contentIndex);
+          return frame.lines;
         },
         invalidate() {
           mouseRows.clear();

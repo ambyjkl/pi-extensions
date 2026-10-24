@@ -5,8 +5,9 @@ import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { type ExtensionCommandContext, initTheme } from "@earendil-works/pi-coding-agent";
 import { getKeybindings, visibleWidth } from "@earendil-works/pi-tui";
+import { createTuiHarness } from "@narumitw/pi-tui-kit/testing";
 import { test, vi } from "vitest";
-import { createCustomSelectorHarness, createMockContext } from "../../../test/support.js";
+import { createMockContext } from "../../../test/support.js";
 import { createUsageSettingsRuntime } from "../src/settings.js";
 import { showUsageSettings } from "../src/usage-settings-ui.js";
 
@@ -50,13 +51,15 @@ test("Settings shows default-off companion usage without a nested confirmation a
     mode: "tui",
     custom: async (factory: unknown) => {
       screenCount++;
-      const harness = createCustomSelectorHarness(factory);
+      const harness = createTuiHarness({ width: 100, keybindings: getKeybindings() });
+      const running = harness.custom(factory as Parameters<typeof harness.custom>[0]);
+      await harness.waitForOpen();
       try {
         rendered = harness.render().join("\n");
-        harness.handleInput("\r");
+        harness.send("\r");
         await vi.waitFor(() => assert.equal(runtime.get().settings.codexFastMode, true));
-        harness.handleInput("\u0003");
-        return await harness.resultPromise;
+        harness.send("\u0003");
+        return await running;
       } finally {
         harness.dispose();
       }
@@ -102,28 +105,35 @@ for (const remapped of [false, true]) {
         "tui.select.cancel": "ctrl+x",
       });
     const applied: string[] = [];
-    const frames: string[][] = [];
-    const compactFrames: string[][] = [];
+    const frames: (readonly string[])[] = [];
+    const compactFrames: (readonly string[])[] = [];
     let description = "";
     const controller = new AbortController();
     const context = createMockContext({
       mode: "tui",
       custom: async (factory: unknown) => {
-        const harness = createCustomSelectorHarness(factory, 100, undefined, 30);
+        const harness = createTuiHarness({ width: 100, rows: 30, keybindings: getKeybindings() });
+        let renderAtWidth: (width: number) => readonly string[] = () => [];
+        const running = harness.custom(async (...args) => {
+          const component = await (factory as Parameters<typeof harness.custom>[0])(...args);
+          renderAtWidth = component.render.bind(component);
+          return component;
+        });
+        await harness.waitForOpen();
         try {
-          for (let row = 0; row < 3; row++) harness.handleInput(remapped ? "\u000e" : "\u001b[B");
+          for (let row = 0; row < 3; row++) harness.send(remapped ? "\u000e" : "\u001b[B");
           description = stripVTControlCharacters(harness.render().join(" ")).replace(/\s+/g, " ");
           frames.push(harness.render());
-          harness.handleInput(remapped ? "\u0019" : "\r");
+          harness.send(remapped ? "\u0019" : "\r");
           await vi.waitFor(() => assert.equal(applied.length, 1));
-          for (const width of [0, 1, 12, 30]) frames.push(harness.render(width));
+          for (const width of [0, 1, 12, 30]) frames.push(renderAtWidth(width));
           for (const rows of [8, 4]) {
-            harness.setTerminalRows(rows);
+            harness.resize({ rows });
             harness.invalidate();
             compactFrames.push(harness.render(40));
           }
-          harness.handleInput("\u0003");
-          return await harness.resultPromise;
+          harness.send("\u0003");
+          return await running;
         } finally {
           harness.dispose();
         }
