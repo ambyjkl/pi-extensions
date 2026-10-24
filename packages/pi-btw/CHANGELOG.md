@@ -1,5 +1,11 @@
 # @narumitw/pi-btw
 
+## 0.63.0
+
+### Minor Changes
+
+- ec9e092: Add manual preview and import of new main-thread context into retained side threads. Keep imported updates in conversation order, preserve earlier request prefixes, and reject incompatible branch or context-boundary changes. Add a configurable import shortcut with F9–F11 fallbacks.
+
 ## 0.62.0
 
 ### Minor Changes

@@ -1,5 +1,11 @@
 # @narumitw/pi-langfuse
 
+## 0.53.3
+
+### Patch Changes
+
+- fa69a68: Keep OpenTelemetry dependencies compatible with the tracing SDK by bounding the API below 1.10 and declaring the matching OTLP exporter base directly. This prevents runtime import failures from the incompatible exporter release line.
+
 ## 0.53.2
 
 ### Patch Changes

@@ -2,6 +2,12 @@
 
 This changelog retains the published `@narumitw/pi-todo` predecessor history below the first `pi-progress` release.
 
+## 0.6.3
+
+### Patch Changes
+
+- 168248c: Reuse published TUI Kit frame metadata, masked input, configured-key syntax, and interaction ownership while retaining extension-owned settings and cancellation policy. Keep malformed Ticker key strings from suppressing valid reorder shortcuts, and drain Usage settings saves after cancellation.
+
 ## 0.6.2
 
 ### Patch Changes
