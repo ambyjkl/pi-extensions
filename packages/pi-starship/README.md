@@ -136,12 +136,14 @@ Short gray labels on the editor borders show draft status and controls.
 The full-width preview has no extra separator, with its last line at the terminal bottom, matching the saved footer's position.
 At short heights, error details yield first; if the whole preview cannot fit beside the editor, it is hidden rather than clipped.
 The view shows recent output with expanded, read-only tool results; use the full conversation review for earlier or long responses.
-Choose **Continue** in a document or transcript review; cancelling that review discards the flow without saving.
+Choose **Continue** in a document or transcript review; cancelling discards the temporary draft but keeps any previously saved profile.
 
-**The agent never writes the active settings file.** Only your separate **Save and apply reviewed draft…** action, exact-document review, and confirmation publish settings, retain the previous document in History, and apply the footer without reload.
+**The agent never writes the active settings file or profiles.** Choose **Save draft as profile…**, review the exact draft, and enter a profile name; invalid or existing names require another name, without overwriting profiles.
+After the profile is saved, a separate confirmation asks whether to apply it to the current footer without reload, retaining the previous active document in History.
+Declining closes the chat, keeps the saved profile, and leaves active settings unchanged; an application failure also retains the profile.
 Applying can start enabled module commands and network requests; review those settings first.
-Closing, discarding, session replacement, or shutdown removes the temporary draft without saving.
-Detected changes to disk or loaded settings block stale publication; this is not a cross-process lock.
+Cancelling the name prompt returns to the chat without saving. Closing, discarding, session replacement, or shutdown removes the temporary draft, not a previously saved profile.
+Detected changes to disk, loaded settings, or the saved profile block stale application; this is not a cross-process lock.
 Saving a repair of an invalid original document requires an explicit repair warning in the confirmation.
 
 Your chat input, settings read by the agent, local paths, and tool results are sent to the selected model provider.

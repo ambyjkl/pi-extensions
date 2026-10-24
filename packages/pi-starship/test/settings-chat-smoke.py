@@ -95,14 +95,19 @@ def run(action, mode):
             assert record["skillLoaded"] and record["tools"] == ["read", "write", "edit"]
             assert record["requests"] == 4
             assert record["executedTools"] == ["read", "write", "edit"]
-            if action == "save":
+            if action in ("save", "save-only"):
                 send(b"\x1b")
-                wait_for("Save and apply reviewed draft")
+                wait_for("Save draft as profile")
                 send(b"\x1b[B" * 3 + b"\r")
                 wait_for("Review draft before saving")
                 send(b"\r")
-                wait_for("Save and apply settings draft?")
-                send(b"\r")
+                wait_for("Save as a profile")
+                send(b"smoke-footer\r")
+                wait_for("Apply saved profile?")
+                saved_profile = agent / "pi-starship/profiles/smoke-footer.toml"
+                assert saved_profile.read_text() == "# smoke draft\nformat = '$model$directory'\n"
+                assert active.read_text() == original
+                send(b"\r" if action == "save" else b"\x1b")
             else:
                 send(b"\x03")
             deadline = time.monotonic() + 20
@@ -115,6 +120,10 @@ def run(action, mode):
             else:
                 assert active.read_text() == original
                 assert not (agent / "pi-starship/history").exists()
+            if action == "discard":
+                assert not (agent / "pi-starship/profiles").exists()
+            else:
+                assert saved_profile.read_text() == "# smoke draft\nformat = '$model$directory'\n"
             send(b"/smoke-check\r")
             child.wait(timeout=20)
             assert child.returncode == 0
@@ -135,3 +144,4 @@ def run(action, mode):
 for mode in ("regular", "fullscreen"):
     run("discard", mode)
     run("save", mode)
+    run("save-only", mode)

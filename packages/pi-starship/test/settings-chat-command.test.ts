@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
@@ -9,7 +9,7 @@ import { createMockContext, createMockPi } from "../../../test/support.js";
 import { showSettingsAgentChat } from "../src/command-settings-chat.js";
 import { registerStarshipCommand, type StarshipCommandOptions } from "../src/commands.js";
 import { type LoadedStarshipConfig, loadStarshipConfig } from "../src/config.js";
-import { listHistory } from "../src/profile-store.js";
+import { createProfile, listHistory, listProfiles, readProfile } from "../src/profile-store.js";
 import { response, settingsChatCustom, testModel } from "./settings-chat-support.js";
 
 function fixture(
@@ -32,6 +32,7 @@ function fixture(
     model: { ...testModel, input: ["text"] },
   });
   const ctx = context.ctx as ExtensionCommandContext;
+  ctx.ui.input = async () => "chat-draft";
   const controller = new AbortController();
   let draftPath: string | undefined;
   let request = 0;
@@ -111,7 +112,7 @@ function fixture(
       tui.send("\x1b");
       await tui.waitForOpen();
       const reviewFrame = tui.render();
-      assert.match(reviewFrame.join("\n"), /Save and apply reviewed draft/u);
+      assert.match(reviewFrame.join("\n"), /Save draft as profile/u);
       const previewRow = reviewFrame.findIndex((line) => line.includes("LIVE FOOTER PREVIEW"));
       assert.match(reviewFrame[previewRow - 1], /─ Preview/u);
       assert.match(reviewFrame[previewRow + 1], /^─+$/u);
@@ -130,7 +131,7 @@ function fixture(
   };
 }
 
-test("agent edits preview immediately; only explicit reviewed save publishes and applies with History", async () => {
+test("agent edits preview immediately; reviewed save creates a named profile before applying with History", async () => {
   const f = fixture();
   try {
     await f.submit();
@@ -143,6 +144,7 @@ test("agent edits preview immediately; only explicit reviewed save publishes and
     assert.equal(readFileSync(f.settingsPath, "utf8"), "# retained\nformat = '$directory'\n");
     assert.equal(f.loaded.rawDocument, readFileSync(f.settingsPath, "utf8"));
     assert.equal(listHistory(f.settingsPath).length, 1);
+    assert.equal(readProfile(f.settingsPath, "chat-draft").rawDocument, f.loaded.rawDocument);
     assert.equal(f.previews.at(-1), undefined);
     assert.equal(f.cleanup, undefined);
     assert.equal(existsSync(f.draftPath ?? ""), false);
@@ -228,6 +230,7 @@ for (const failure of [
       const expected =
         failure === "disk conflict" ? "format = '$model$directory'\n" : "# retained\nformat = '$model'\n";
       assert.equal(readFileSync(f.settingsPath, "utf8"), expected);
+      assert.equal(readProfile(f.settingsPath, "chat-draft").rawDocument, "# retained\nformat = '$directory'\n");
       assert.equal(existsSync(f.draftPath ?? ""), false);
     } finally {
       await f.dispose();
@@ -269,23 +272,156 @@ test("a missing active file is created only by the explicit save action", async 
   }
 });
 
-test("declining a save allows a second explicit attempt without duplicate publication", async () => {
+test("declining application keeps the saved profile and leaves active settings unchanged", async () => {
   const f = fixture();
-  let confirmations = 0;
-  f.ctx.ui.confirm = async () => ++confirmations > 1;
+  f.ctx.ui.confirm = async (title) => {
+    assert.equal(title, "Apply saved profile?");
+    assert.equal(readProfile(f.settingsPath, "chat-draft").rawDocument, "# retained\nformat = '$directory'\n");
+    assert.equal(readFileSync(f.settingsPath, "utf8"), "# retained\nformat = '$model'\n");
+    return false;
+  };
   try {
     await f.submit();
     await f.chooseSave();
-    await f.tui.waitForOpen();
+    assert.equal(await f.running, "close");
     assert.equal(f.applied, 0);
-    await f.chooseSave();
-    assert.equal(await f.running, "applied");
-    assert.equal(f.applied, 1);
-    assert.equal(listHistory(f.settingsPath).length, 1);
+    assert.equal(listProfiles(f.settingsPath).length, 1);
+    assert.equal(listHistory(f.settingsPath).length, 0);
+    assert.equal(readFileSync(f.settingsPath, "utf8"), "# retained\nformat = '$model'\n");
+    assert.equal(f.previews.at(-1), undefined);
+    assert.equal(existsSync(f.draftPath ?? ""), false);
   } finally {
     await f.dispose();
   }
 });
+
+test("invalid and duplicate names retry without overwriting profiles or applying early", async () => {
+  const f = fixture();
+  const names = ["../unsafe", "taken", "新介面"];
+  let attempts = 0;
+  let confirmations = 0;
+  createProfile(f.settingsPath, "taken", "format = '$model'\n");
+  f.ctx.ui.input = async () => {
+    assert.equal(f.applied, 0);
+    assert.equal(confirmations, 0);
+    return names[attempts++];
+  };
+  f.ctx.ui.confirm = async () => {
+    confirmations += 1;
+    assert.equal(readProfile(f.settingsPath, "新介面").rawDocument, "# retained\nformat = '$directory'\n");
+    return false;
+  };
+  try {
+    await f.submit();
+    await f.chooseSave();
+    assert.equal(await f.running, "close");
+    assert.equal(attempts, 3);
+    assert.equal(confirmations, 1);
+    assert.equal(readProfile(f.settingsPath, "taken").rawDocument, "format = '$model'\n");
+    assert.equal(listProfiles(f.settingsPath).length, 2);
+    assert.ok(f.context.notifications.some((item) => /Invalid profile name/u.test(item.message)));
+    assert.ok(f.context.notifications.some((item) => /already exists/u.test(item.message)));
+  } finally {
+    await f.dispose();
+  }
+});
+
+for (const cancellation of ["cancel", "owner abort", "hard cancel", "runtime change"] as const) {
+  test(`naming ${cancellation} cannot save a profile or apply settings`, async () => {
+    const f = fixture();
+    let terminalInput: ((data: string) => unknown) | undefined;
+    let released = false;
+    let confirmed = false;
+    f.ctx.ui.onTerminalInput = (listener) => {
+      terminalInput = listener;
+      return () => {
+        released = true;
+      };
+    };
+    f.ctx.ui.input = async () => {
+      if (cancellation === "owner abort") f.controller.abort();
+      if (cancellation === "hard cancel") terminalInput?.("\x03");
+      if (cancellation === "runtime change") f.options.apply({ ...f.loaded, rawDocument: "other runtime" }, f.ctx);
+      return cancellation === "cancel" ? undefined : "must-not-save";
+    };
+    f.ctx.ui.confirm = async () => {
+      confirmed = true;
+      return true;
+    };
+    try {
+      await f.submit();
+      await f.chooseSave();
+      if (cancellation === "cancel") {
+        await f.tui.waitForOpen();
+        f.tui.send("\x03");
+      }
+      assert.equal(await f.running, "close");
+      assert.equal(confirmed, false);
+      assert.equal(released, true);
+      assert.equal(listProfiles(f.settingsPath).length, 0);
+      assert.equal(listHistory(f.settingsPath).length, 0);
+      assert.equal(readFileSync(f.settingsPath, "utf8"), "# retained\nformat = '$model'\n");
+      assert.equal(existsSync(f.draftPath ?? ""), false);
+    } finally {
+      await f.dispose();
+    }
+  });
+}
+
+test("profile storage failure never opens the apply confirmation", async () => {
+  const f = fixture();
+  writeFileSync(join(f.root, "pi-starship"), "not a directory");
+  let attempts = 0;
+  let confirmed = false;
+  f.ctx.ui.input = async () => (++attempts === 1 ? "blocked" : undefined);
+  f.ctx.ui.confirm = async () => {
+    confirmed = true;
+    return true;
+  };
+  try {
+    await f.submit();
+    await f.chooseSave();
+    await f.tui.waitForOpen();
+    f.tui.send("\x03");
+    assert.equal(await f.running, "close");
+    assert.equal(attempts, 2);
+    assert.equal(confirmed, false);
+    assert.equal(f.applied, 0);
+    assert.equal(readFileSync(f.settingsPath, "utf8"), "# retained\nformat = '$model'\n");
+    assert.ok(f.context.notifications.some((item) => /Not a safe directory/u.test(item.message)));
+  } finally {
+    await f.dispose();
+  }
+});
+
+for (const mutation of ["edit", "remove", "replace"] as const) {
+  test(`saved profile ${mutation} during apply confirmation blocks stale application`, async () => {
+    const f = fixture();
+    f.ctx.ui.confirm = async () => {
+      const saved = readProfile(f.settingsPath, "chat-draft");
+      if (mutation === "remove") unlinkSync(saved.path);
+      else if (mutation === "edit") writeFileSync(saved.path, "format = '$model'\n");
+      else {
+        renameSync(saved.path, `${saved.path}.old`);
+        writeFileSync(saved.path, saved.rawBytes);
+      }
+      return true;
+    };
+    try {
+      await f.submit();
+      await f.chooseSave();
+      await f.tui.waitForOpen();
+      assert.equal(f.applied, 0);
+      assert.equal(listHistory(f.settingsPath).length, 0);
+      assert.equal(readFileSync(f.settingsPath, "utf8"), "# retained\nformat = '$model'\n");
+      assert.ok(f.context.notifications.some((item) => /Settings were not applied/u.test(item.message)));
+      f.tui.send("\x03");
+      assert.equal(await f.running, "close");
+    } finally {
+      await f.dispose();
+    }
+  });
+}
 
 for (const screen of ["actions", "save review"] as const) {
   test(`disposing the ${screen} cannot reopen chat or publish settings`, async () => {

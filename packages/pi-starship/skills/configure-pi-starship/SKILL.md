@@ -19,8 +19,9 @@ Use `read` before `edit`, preserve comments and unknown fields, and repair error
 A rejected preview can leave invalid text in the draft; fix that text rather than assuming the write was rolled back.
 Do not run or request the resolver, validator, backup, or apply scripts in this workflow.
 Do not request shell access, publish settings, or tell the user that settings were saved.
-Only the user can choose the host's separate save-and-apply action after review.
-Closing or discarding the preview does not save it.
+Only the user can choose the host's reviewed Save draft as profile action and enter its name.
+The host then asks separately whether to apply the saved profile; declining keeps the profile without changing active settings.
+Closing or discarding before that user save does not save the preview.
 
 ## Choose the task path
 

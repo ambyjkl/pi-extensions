@@ -84,7 +84,10 @@ test("hosted skill workflow uses draft tools without changing the standalone pub
     "without `/reload`",
     "Do not run or request the resolver",
     "Only the user can choose",
-    "Closing or discarding the preview does not save it",
+    "Save draft as profile action and enter its name",
+    "asks separately whether to apply the saved profile",
+    "declining keeps the profile without changing active settings",
+    "Closing or discarding before that user save does not save the preview",
   ])
     assert.ok(hosted.includes(rule));
   assert.ok(skill.includes('node "$skill_dir/scripts/apply.mjs"'));

@@ -35,8 +35,10 @@ Reads cover the immutable active settings snapshot, private draft, and bundled s
 The preview uses cached data without starting module commands or network requests.
 The configured cancel action stops a response or opens review when idle; editor actions win collisions, with Escape as a review fallback unless assigned to an editor action.
 Ctrl+C discards the flow.
-Only the separate user save action, exact-draft review, and confirmation publish the draft through managed History and atomic replacement; closing or session replacement never saves it.
-Saving checks the initial disk snapshot and loaded revision, blocks detected concurrent changes, and warns before explicitly repairing an invalid original.
+The separate Save draft as profile action requires exact-draft review and a profile name; invalid or existing names are rejected without overwriting a profile.
+After saving, the host asks whether to apply that profile through managed History and atomic replacement; declining keeps the profile without changing active settings.
+Cancelling naming returns to the chat without saving; closing or session replacement removes the temporary draft, not any saved profile.
+Application checks the initial disk snapshot, loaded revision, and saved profile identity, blocks detected concurrent changes, and warns before explicitly repairing an invalid original.
 Chat content and settings read by the agent go to the selected model provider; the child uses the opening model/thinking selection with Pi authentication, has no shell tool, and does not persist its transcript or change the main conversation.
 The fullscreen view uses Pi's native user/assistant/tool message components. Short gray status and control labels sit on the editor borders; the live preview ends at the terminal bottom, in the saved footer's position.
 It shows recent output with expanded, read-only tool results; review actions expose the complete transcript and exact draft.

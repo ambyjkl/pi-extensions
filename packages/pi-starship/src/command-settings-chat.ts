@@ -5,7 +5,9 @@ import { sanitizeTerminalDocument } from "@narumitw/pi-tui-kit/terminal-document
 import { captureCommitExpectation, commitActiveDocument, commitOwnerCurrent } from "./command-commit.js";
 import type { WorkflowOwner } from "./command-configuration.js";
 import { showPreviewActionMenu } from "./command-preview.js";
+import { saveAsProfile } from "./command-profiles.js";
 import type { StarshipCommandOptions } from "./commands.js";
+import { assertProfileUnchanged } from "./profile-store.js";
 import { createSettingsAgent, starshipPackageRoot } from "./settings-agent.js";
 import {
   type ChatViewState,
@@ -87,7 +89,7 @@ export async function showSettingsAgentChat(
           { value: "continue", label: "Continue conversation" },
           { value: "document", label: "Review exact draft…" },
           { value: "transcript", label: "Review full conversation…" },
-          ...(draft.candidate ? [{ value: "save" as const, label: "Save and apply reviewed draft…" }] : []),
+          ...(draft.candidate ? [{ value: "save" as const, label: "Save draft as profile…" }] : []),
           { value: "discard", label: "Discard preview and close" },
         ],
         owner.signal,
@@ -113,11 +115,21 @@ export async function showSettingsAgentChat(
       const reviewed = await reviewText(ctx, owner, "Review draft before saving", candidate.rawDocument ?? "", true);
       if (!owner.isCurrent() || !reviewed) return "close";
       draft.assertRevision(revision);
+      const saved = await saveAsProfile(
+        ctx,
+        options,
+        { ...owner, isCurrent: () => owner.isCurrent() && draft.revision === revision },
+        candidate.rawDocument ?? "",
+      );
+      if (!owner.isCurrent() || saved === "close") return "close";
+      draft.assertRevision(revision);
+      if (!saved) continue;
       const repair = expected.previous.diagnostics.some((item) => item.severity === "error");
       const confirmed = await ctx.ui.confirm(
-        "Save and apply settings draft?",
+        "Apply saved profile?",
         [
-          "Replace the complete active settings document with the reviewed draft? The footer updates without reload.",
+          `Profile saved: ${sanitizeTerminalDocument(saved.name)}. Apply it to the current footer without reload?`,
+          "This replaces the complete active settings document. Declining keeps the profile and leaves active settings unchanged.",
           "Applying can run enabled module commands and network requests; review their configuration before accepting.",
           "The previous file is retained in History. Detected concurrent edits block replacement.",
           ...(repair ? ["The original settings document is invalid. Confirm only if you requested its repair."] : []),
@@ -126,17 +138,18 @@ export async function showSettingsAgentChat(
         { signal: owner.signal },
       );
       if (!owner.isCurrent()) return "close";
-      if (!confirmed) continue;
+      if (!confirmed) return "close";
       try {
-        const result = await commitActiveDocument(ctx, options, candidate, owner, expected, repair, () =>
-          draft.assertRevision(revision),
-        );
+        const result = await commitActiveDocument(ctx, options, candidate, owner, expected, repair, () => {
+          draft.assertRevision(revision);
+          assertProfileUnchanged(options.settingsPath, saved);
+        });
         if (result === "applied") return "applied";
         return "close";
       } catch (error) {
         if (!base.signal.aborted && base.isCurrent())
           ctx.ui.notify(
-            `Settings were not applied: ${sanitizeTerminalDocument(error instanceof Error ? error.message : String(error))}`,
+            `Profile was saved as ${sanitizeTerminalDocument(saved.name)}. Settings were not applied: ${sanitizeTerminalDocument(error instanceof Error ? error.message : String(error))}`,
             "error",
           );
       }
