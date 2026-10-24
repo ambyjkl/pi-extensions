@@ -13,8 +13,9 @@ import {
   summarizeBringToMain,
 } from "./bring-to-main.js";
 import type { BtwDisplayModel } from "./conversation-chrome.js";
-import { buildConversationContext } from "./conversation-context.js";
 import { type RunBtwFullscreen, runBtwFullscreen } from "./fullscreen-ui.js";
+import { importMainUpdates } from "./import-main-updates.js";
+import { buildMainContextSnapshot, captureMainContextSource } from "./main-context-snapshot.js";
 import { registerBtwMainThreadUpdates } from "./main-thread-updates.js";
 import { pickMainEntry } from "./main-tree-picker.js";
 import {
@@ -43,6 +44,7 @@ import {
   createSideThread,
   type SideQuestionAuth,
   type SideThread,
+  sideTranscript,
 } from "./side-thread.js";
 import { sanitizeSingleLine } from "./text.js";
 import { type BtwMarkdownTransformers, prepareBtwTranscriptMarkdown } from "./transcript-markdown.js";
@@ -218,11 +220,11 @@ export default function btw(pi: ExtensionAPI, dependencies: BtwExtensionDependen
   const listResumeThreads = (resumableThreads: Map<string, BtwThreadState>): BtwResumeThreadSummary[] =>
     [...resumableThreads.values()]
       .reverse()
-      .filter((state) => state.thread.turns.length > 0 && state.title)
+      .filter((state) => (state.thread.turns.length > 0 && state.title) || state.thread.updates.length > 0)
       .sort((first, second) => second.updatedAt - first.updatedAt || second.createdAt - first.createdAt)
       .map((state) => ({
         id: state.id,
-        title: state.title ?? "Untitled side thread",
+        title: state.title ?? "Main context updates",
         questionCount: state.thread.turns.length,
       }));
   pi.registerCommand("btw", {
@@ -253,7 +255,7 @@ export default function btw(pi: ExtensionAPI, dependencies: BtwExtensionDependen
     }
 
     let menuResult: BtwCommandMenuResult = "start";
-    let selectedConversationContext: string | undefined;
+    let selectedSource: ReturnType<typeof captureMainContextSource> | undefined;
     if (!question) {
       while (true) {
         menuResult = await showCommandMenu(pi, ctx, listResumeThreads(resumableThreads));
@@ -273,7 +275,7 @@ export default function btw(pi: ExtensionAPI, dependencies: BtwExtensionDependen
             notifySafely(ctx, "The selected main-thread branch is no longer available", "warning");
             continue;
           }
-          selectedConversationContext = buildConversationContext(branch);
+          selectedSource = captureMainContextSource(ctx.sessionManager, treeResult.entryId, branch);
           menuResult = "start";
           break;
         } catch {
@@ -310,11 +312,10 @@ export default function btw(pi: ExtensionAPI, dependencies: BtwExtensionDependen
           if (lifetime.signal.aborted) return Promise.resolve({ kind: "closed" as const });
           if (!state) {
             const createdAt = Date.now();
+            const source = selectedSource ?? captureMainContextSource(fullscreenCtx.sessionManager);
             state = {
               id: `btw-${nextThreadNumber}`,
-              thread: createSideThread(
-                selectedConversationContext ?? buildConversationContext(fullscreenCtx.sessionManager.getBranch()),
-              ),
+              thread: createSideThread(source.conversationContext, source.anchor),
               thinkingLevel: settings.thinkingLevel ?? pi.getThinkingLevel(),
               createdAt,
               updatedAt: createdAt,
@@ -345,7 +346,11 @@ export default function btw(pi: ExtensionAPI, dependencies: BtwExtensionDependen
         },
       );
     } finally {
-      if (!lifetime.signal.aborted && state?.title && state.thread.turns.length > 0) {
+      if (
+        !lifetime.signal.aborted &&
+        state &&
+        ((state.title && state.thread.turns.length > 0) || state.thread.updates.length > 0)
+      ) {
         if (state.thread.turns.length > startingTurnCount) {
           resumableThreads.delete(state.id);
         }
@@ -400,6 +405,7 @@ interface RunBtwThreadDependencies {
   deliverBringToMain?: typeof loadBringToMainDraft;
   persistThinkingLevel?: (level: BtwThinkingLevel) => Promise<unknown>;
   now?: () => number;
+  importUpdates?: typeof importMainUpdates;
 }
 
 export type BtwThreadResult = { kind: "closed" };
@@ -454,7 +460,8 @@ export async function runBtwThread({
     dependencies.persistThinkingLevel ??
     ((level: BtwThinkingLevel) => updateBtwSettings({ thinkingLevel: level }, { settingsPath }));
   const now = dependencies.now ?? Date.now;
-  const thread = state?.thread ?? createSideThread(buildConversationContext(ctx.sessionManager.getBranch()));
+  const source = state ? undefined : captureMainContextSource(ctx.sessionManager);
+  const thread = state?.thread ?? createSideThread(source?.conversationContext ?? "", source?.anchor);
   const thinkingLevels = getSupportedThinkingLevels(selected.model);
   const pendingWrites = new Set<Promise<void>>();
   const steeringQuestions: string[] = [];
@@ -495,6 +502,12 @@ export async function runBtwThread({
           provider: selected.model.provider,
         });
         if (ctx.signal?.aborted || action.kind === "close") return { kind: "closed" };
+        if (action.kind === "importMainUpdates") {
+          composerDraft = action.questionDraft;
+          const result = await (dependencies.importUpdates ?? importMainUpdates)(thread, ctx);
+          if (ctx.signal?.aborted || result === "close") return { kind: "closed" };
+          continue;
+        }
         if (action.kind === "bringToMain") {
           const choice = await chooseBringToMainAction(thread, ctx);
           if (ctx.signal?.aborted) return { kind: "closed" };
@@ -813,8 +826,8 @@ async function prepareCurrentTranscriptMarkdown(
     if (ctx.signal?.aborted) return undefined;
     const turnCount = thread.turns.length;
     const createMarkdownTransformers = ctx.signal
-      ? await prepareBtwTranscriptMarkdown(thread.turns, pendingQuestion, ctx.signal)
-      : await prepareBtwTranscriptMarkdown(thread.turns, pendingQuestion);
+      ? await prepareBtwTranscriptMarkdown(sideTranscript(thread), pendingQuestion, ctx.signal)
+      : await prepareBtwTranscriptMarkdown(sideTranscript(thread), pendingQuestion);
     if (!createMarkdownTransformers || ctx.signal?.aborted) return undefined;
     if (thread.turns.length === turnCount) return createMarkdownTransformers;
   }
@@ -835,7 +848,7 @@ async function askThreadQuestion(
     const view = new BtwAnsweringView(
       tui,
       theme,
-      thread.turns,
+      sideTranscript(thread),
       question,
       () => {
         if (settled) return;
@@ -881,9 +894,21 @@ async function showThreadComposer(
 ): Promise<TranscriptPagerAction> {
   const createMarkdownTransformers = await prepareCurrentTranscriptMarkdown(thread, initialQuestion, ctx);
   if (!createMarkdownTransformers || ctx.signal?.aborted) return { kind: "close" };
+  let statusLeaf: string | null | undefined;
+  let hasUpdates = false;
+  const mainUpdates = () => {
+    if (ctx.signal?.aborted || !thread.source) return false;
+    const leaf = ctx.sessionManager.getLeafId();
+    if (leaf !== statusLeaf) {
+      statusLeaf = leaf;
+      hasUpdates = buildMainContextSnapshot(ctx.sessionManager, thread.source).kind === "ready";
+    }
+    return hasUpdates;
+  };
   return ctx.ui.custom<TranscriptPagerAction>(
     (tui, theme, keybindings, done) =>
-      new BtwTranscriptPager(tui, theme, thread.turns, done, {
+      new BtwTranscriptPager(tui, theme, sideTranscript(thread), done, {
+        mainUpdates,
         startAtBottom,
         initialQuestion,
         model,

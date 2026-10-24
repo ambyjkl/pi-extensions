@@ -5,6 +5,7 @@ import { initTheme } from "@earendil-works/pi-coding-agent";
 import { type Component, getKeybindings, type TUI, TuiAltScreen } from "@earendil-works/pi-tui";
 import { test } from "vitest";
 import { runBtwFullscreen } from "../src/fullscreen-ui.js";
+import type { SideTranscriptItem } from "../src/side-thread.js";
 import { BtwAnsweringView, BtwTranscriptPager } from "../src/transcript-pager.js";
 
 const OPEN_SEARCH = "\u001b[102;6u";
@@ -128,7 +129,7 @@ function readSearchStatus(writes: readonly string[]): { index: number; count: nu
   return { index: Number(match[1]), count: Number(match[2]) };
 }
 
-const cases = ["completed", "answering"] as const;
+const cases = ["completed", "answering", "imported"] as const;
 
 test.each(cases)(
   "%s side-thread fullscreen searches with callback-theme styles and preserves the composer",
@@ -140,7 +141,7 @@ test.each(cases)(
     const running = runBtwFullscreen(harness.ctx, (fullscreenCtx) =>
       fullscreenCtx.ui.custom<"closed">((tui, theme, _keys, done) => {
         sideTui = tui;
-        const turns = [
+        const turns: SideTranscriptItem[] = [
           {
             question: `${kind} question`,
             answer,
@@ -148,7 +149,21 @@ test.each(cases)(
             response: response(answer),
           },
         ];
-        if (kind === "completed") {
+        if (kind === "imported") {
+          turns.splice(0, turns.length, {
+            kind: "mainContext",
+            turnIndex: 0,
+            snapshot: {
+              kind: "ready",
+              source: { sessionId: "test", entryId: "b" },
+              target: { sessionId: "test", entryId: "d" },
+              text: answer,
+              entryCount: 2,
+            },
+            message: { role: "user", content: answer, timestamp: 1 },
+          });
+        }
+        if (kind !== "answering") {
           return new BtwTranscriptPager(
             tui,
             theme,
@@ -181,7 +196,7 @@ test.each(cases)(
     assert.match(searchFrame, /needle/);
     assert.ok(sideTui instanceof TuiAltScreen);
     assert.match(stripVTControlCharacters(sideTui.getScreenLines().at(-2) ?? ""), /^btw/u);
-    assert.match(searchFrame, kind === "completed" ? /Ctrl\+C/ : /Answering…/);
+    assert.match(searchFrame, kind === "answering" ? /Answering…/ : /Ctrl\+C/);
 
     harness.writes.length = 0;
     harness.input("\r");

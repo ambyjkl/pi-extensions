@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { type ExtensionCommandContext, SessionManager } from "@earendil-works/pi-coding-agent";
 import { beforeEach, test, vi } from "vitest";
 import { createMockContext, createMockPi } from "../../../test/support.js";
 import type { BtwExtensionDependencies } from "../src/btw.js";
@@ -21,6 +21,77 @@ beforeEach(async () => {
   extension = await import("../src/btw.js");
   settings = await import("../src/settings.js");
 });
+
+test("confirmed imports before a first question remain resumable and replacement discards them", async () => {
+  const { buildMainContextSnapshot } = await import("../src/main-context-snapshot.js");
+  const { appendMainContextUpdate } = await import("../src/side-thread.js");
+  const manager = SessionManager.inMemory();
+  const menus: Array<readonly { id: string; title: string; questionCount: number }[]> = [];
+  let runs = 0;
+  const app = harness({
+    showCommandMenu: async (_pi, _ctx, threads) => {
+      menus.push(threads);
+      if (menus.length === 1) return "start";
+      return threads[0] ? { kind: "resume", threadId: threads[0].id } : "closed";
+    },
+    runThread: async ({ state }) => {
+      assert.ok(state);
+      if (++runs === 1) {
+        manager.appendMessage({ role: "user", content: "new main context", timestamp: 1 });
+        const snapshot = buildMainContextSnapshot(manager, state.thread.source);
+        assert.equal(snapshot.kind, "ready");
+        if (snapshot.kind === "ready") assert.equal(appendMainContextUpdate(state.thread, snapshot), true);
+      } else {
+        assert.equal(state.thread.updates.length, 1);
+        assert.equal(state.thread.turns.length, 0);
+      }
+      return { kind: "closed" };
+    },
+  });
+  Object.defineProperty(app.ctx, "sessionManager", { value: manager });
+  await app.emit("session_start");
+  await app.command("");
+  await app.command("");
+  assert.equal(menus[1]?.[0]?.title, "Main context updates");
+  assert.equal(menus[1]?.[0]?.questionCount, 0);
+  await app.emit("session_shutdown", "reload");
+  await app.emit("session_start");
+  await app.command("");
+  assert.deepEqual(menus[2], []);
+  assert.equal(runs, 2);
+});
+
+for (const reason of ["new", "resume", "fork", "reload", "quit"]) {
+  test(`shutdown(${reason}) cancels a pending import without cursor publication`, async () => {
+    const { importMainUpdates } = await import("../src/import-main-updates.js");
+    const manager = SessionManager.inMemory();
+    const entered = deferred();
+    let retainedThread: import("../src/side-thread.js").SideThread | undefined;
+    const app = harness({
+      runThread: async ({ state, ctx }) => {
+        assert.ok(state);
+        retainedThread = state.thread;
+        manager.appendMessage({ role: "user", content: "pending update", timestamp: 1 });
+        await importMainUpdates(state.thread, ctx, async () => {
+          entered.resolve();
+          const signal = ctx.signal;
+          assert.ok(signal);
+          await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+          return "confirm";
+        });
+        return { kind: "closed" };
+      },
+    });
+    Object.defineProperty(app.ctx, "sessionManager", { value: manager });
+    await app.emit("session_start");
+    const running = app.command("");
+    await entered.promise;
+    await app.emit("session_shutdown", reason);
+    await running;
+    assert.equal(retainedThread?.updates.length, 0);
+    assert.equal(retainedThread?.source?.entryId, null);
+  });
+}
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;

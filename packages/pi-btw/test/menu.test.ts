@@ -266,6 +266,7 @@ test.each([
   ["exit", "Exit shortcut", "ctrl+q", "Ctrl+Q"],
   ["cycleThinkingLevel", "Cycle thinking level shortcut", "f6", "F6"],
   ["bringToMain", "Bring to main shortcut", "f7", "F7"],
+  ["importMainUpdates", "Import main updates shortcut", "f12", "F12"],
 ])("BTW Settings edits and resets %s without changing the main draft", async (action, label, key, display) => {
   await withMenu(async ({ settingsPath, tui, ctx }) => {
     const running = showBtwCommandMenu(ctx, {

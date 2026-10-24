@@ -9,7 +9,13 @@ import {
 } from "@earendil-works/pi-tui";
 import { formatKeyLabel } from "./text.js";
 
-export const BTW_SHORTCUT_ACTIONS = ["exit", "cycleThinkingLevel", "bringToMain", "switchPane"] as const;
+export const BTW_SHORTCUT_ACTIONS = [
+  "exit",
+  "cycleThinkingLevel",
+  "bringToMain",
+  "switchPane",
+  "importMainUpdates",
+] as const;
 export type BtwShortcutAction = (typeof BTW_SHORTCUT_ACTIONS)[number];
 export type BtwKeybindingOverrides = Partial<Record<BtwShortcutAction, string>>;
 
@@ -204,13 +210,20 @@ function resolveShortcutSnapshot(
   copyOnSelect = true,
 ): BtwShortcuts {
   const reserved = reservedKeys(keybindings, copyOnSelect);
-  const keys: BtwShortcuts["keys"] = { exit: ["ctrl+c"], cycleThinkingLevel: [], bringToMain: [], switchPane: [] };
+  const keys: BtwShortcuts["keys"] = {
+    exit: ["ctrl+c"],
+    cycleThinkingLevel: [],
+    bringToMain: [],
+    switchPane: [],
+    importMainUpdates: [],
+  };
   const warnings: string[] = [];
   const defaults: Record<BtwShortcutAction, readonly string[]> = {
     exit: ["ctrl+c"],
     cycleThinkingLevel: keybindings.getKeys("app.thinking.cycle"),
     bringToMain: ["ctrl+r"],
     switchPane: ["f6", "f7", "f8"],
+    importMainUpdates: ["f9", "f10", "f11"],
   };
   const usable = (action: BtwShortcutAction, candidate: string, inherited = false): string | undefined => {
     const key = normalizeBtwKey(candidate);
@@ -242,6 +255,18 @@ function resolveShortcutSnapshot(
               btwKeysOverlap(key, other),
             ),
         ) === false,
+    )
+    .slice(0, 1);
+  availableDefaults.importMainUpdates = availableDefaults.importMainUpdates
+    .filter(
+      (key) =>
+        !BTW_SHORTCUT_ACTIONS.some(
+          (action) =>
+            action !== "importMainUpdates" &&
+            (candidates[action] ? [candidates[action]] : availableDefaults[action]).some((other) =>
+              btwKeysOverlap(key, other),
+            ),
+        ),
     )
     .slice(0, 1);
   // Compare the complete proposal, not only actions visited earlier. Reject conflicts
@@ -281,7 +306,7 @@ function resolveShortcutSnapshot(
     keys[action] =
       action === "exit"
         ? [...new Set([...effective, "ctrl+c"])]
-        : action === "switchPane"
+        : action === "switchPane" || action === "importMainUpdates"
           ? effective.slice(0, 1)
           : effective;
     if (!keys[action].length && (override !== undefined || defaults[action].length > 0))
@@ -313,7 +338,7 @@ export function validateBtwShortcutEdit(
     if (
       (item === action && !resolved.keys[item].includes(normalizeBtwKey(value) ?? "")) ||
       (item !== action &&
-        !(item === "switchPane" && overrides.switchPane === undefined) &&
+        !((item === "switchPane" || item === "importMainUpdates") && overrides[item] === undefined) &&
         previous.keys[item].some((key) => !resolved.keys[item].includes(key)))
     ) {
       return `${item} conflicts with another BTW shortcut, editing, selection, search, scrolling, or copying. Choose a different key.`;
