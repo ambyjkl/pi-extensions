@@ -216,6 +216,7 @@ async function documentActions(
   const profile = document.kind === "profile";
   const activeInvalid = profile && options.getLoaded().diagnostics.some((item) => item.severity === "error");
   const action = await actionScreen(ctx, flow, {
+    kind: document.kind,
     title: `${profile ? "Profile" : "Recovery copy"}: ${safe(document.name)}`,
     lines: [
       `Path: ${safe(document.path)}`,
@@ -242,8 +243,8 @@ async function documentActions(
       ...(profile
         ? [
             { id: "edit", label: "Edit TOML…" },
-            { id: "rename", label: "Rename…" },
             { id: "duplicate", label: "Duplicate…" },
+            { id: "rename", label: "Rename…" },
           ]
         : [
             {
@@ -445,7 +446,7 @@ async function saveNamedCopy(
 async function actionScreen(
   ctx: ExtensionCommandContext,
   flow: ReturnType<typeof createFlow>,
-  screen: { title: string; lines: string[]; actions: Action[]; raw: string | undefined },
+  screen: { kind?: Document["kind"]; title: string; lines: string[]; actions: Action[]; raw: string | undefined },
 ): Promise<string> {
   let selected: string | undefined;
   const menu = defineMenu<undefined, "actions" | "document", "select">({
@@ -456,6 +457,9 @@ async function actionScreen(
         title: screen.title,
         lines: screen.lines,
         items: [
+          ...(screen.kind === "profile"
+            ? screen.actions.slice(0, 1).map((action) => ({ ...action, action: "select" as const }))
+            : []),
           {
             id: "review",
             label: "Review TOML",
@@ -463,7 +467,10 @@ async function actionScreen(
             disabled: screen.raw === undefined,
             disabledReason: "The document is not valid UTF-8",
           },
-          ...screen.actions.map((action) => ({ ...action, action: "select" as const })),
+          ...(screen.kind === "profile" ? screen.actions.slice(1) : screen.actions).map((action) => ({
+            ...action,
+            action: "select" as const,
+          })),
         ],
         hint: "back",
       }),
