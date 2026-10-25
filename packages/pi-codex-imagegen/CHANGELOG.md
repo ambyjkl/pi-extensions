@@ -1,5 +1,12 @@
 # @narumitw/pi-codex-imagegen
 
+## 0.1.1
+
+### Patch Changes
+
+- Updated dependencies [57eeae7]
+  - @narumitw/pi-tui-kit@0.67.0
+
 ## 0.1.0
 
 ### Minor Changes
