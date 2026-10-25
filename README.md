@@ -265,7 +265,6 @@ Reusable libraries publish built ESM and declarations from `dist/`.
 
 The following packages remain available as source references but are excluded from active workspace scripts:
 
-- `pi-biome-lsp` and `pi-python-lsp` — replaced by [`pi-lsp`](./packages/pi-lsp)
 - `pi-codex-accounts` — replaced by [`pi-accounts`](./packages/pi-accounts)
 - `pi-codex-usage` — replaced by [`pi-usage`](./packages/pi-usage)
 - [`pi-cbmem`](./deprecated/pi-cbmem) — deprecated without a replacement because a simple benchmark found insufficient benefit and substantially higher token usage
