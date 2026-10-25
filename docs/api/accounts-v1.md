@@ -93,6 +93,18 @@ type AccountActivationErrorCode =
 
 When `PI_ACCOUNT` is set (even to an invalid value), activation requests cannot change or restore the session selection and return `activation_failed`; topology still lists configured accounts. Unset the variable and restart Pi before requesting explicit activation. A pre-aborted request changes no selection. A valid request can persist the session selection **before** runtime activation succeeds; failure or cancellation afterward does not roll it back. Failed authentication may leave that provider fail-closed instead of falling back to another account. A newer explicit selection supersedes pending work, but a routine model/turn sync of the same selection does not. Cancelling a consumer's wait for a replacement sync does not cancel that session-owned sync. Revalidate session, account, and request ownership after every await before starting dependent work.
 
+## Selection notification: `accounts:selection-committed:v1`
+
+After an explicit selection is persisted for a session, the owner emits this notification:
+
+```ts
+pi.events.on("accounts:selection-committed:v1", (event) => {
+  // Invalidate session-scoped data for event.providerId.
+});
+```
+
+The payload contains only the exact `session` object, its `sessionId`, and `providerId`. It contains no account name or credential. The notification is deferred until the selecting flow has started its session-owned activation sync; it does not report that authentication succeeded. Consumers must match both session fields, clear account-derived data that may belong to the previous selection, and wait for [OAuth Credential Readiness v1](oauth-credential-readiness-v1.md) before resolving the new authentication. Stale or superseded selections are not published.
+
 ## Consumer safety and compatibility
 
 Without a compatible responder, neither channel replies. Bound each wait and abort unneeded requests; a timeout is **not** proof that activation did not happen. Never start dependent work without a confirmed result. Late replies must not authorize work in a replacement session. Only one account infrastructure responder should own these channels; a first reply is not proof of exclusivity, so treat detected duplicate replies as a conflict. A callback that throws is ignored by this responder, but consumers should handle callbacks safely.
