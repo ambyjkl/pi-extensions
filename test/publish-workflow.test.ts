@@ -13,7 +13,7 @@ test("publish workflow uses native Changesets artifact publishing without duplic
     /script: npm run publish-packages -- --from-pack-dir \$\{\{ runner\.temp \}\}\/changeset-pack/u,
   );
   const manifest = JSON.parse(readFileSync(path.join(process.cwd(), "package.json"), "utf8"));
-  assert.equal(manifest.scripts["publish-packages"], "changeset publish");
+  assert.equal(manifest.scripts["publish-packages"], "node ./scripts/publish-packed-packages.mjs");
   assert.match(publish, /create-github-releases: true/u);
   assert.match(publish, /push-git-tags: true/u);
   assert.match(publish, /NPM_CONFIG_PROVENANCE: "true"/u);

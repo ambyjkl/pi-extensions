@@ -7,7 +7,7 @@ import {
   setKeybindings,
   setKittyProtocolActive,
   TUI_KEYBINDINGS,
-  type TuiAltScreen,
+  TuiAltScreen,
 } from "@earendil-works/pi-tui";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkflowOwner } from "../src/command-configuration.js";
@@ -524,6 +524,93 @@ describe("settings chat native fullscreen host", () => {
       expect(f.terminal.events.every((event) => event.depth === 0)).toBe(true);
     },
   );
+
+  it.each(["listener", "create", "get-layout", "layout", "focus"])(
+    "stops an unreturned child and cancels pending rendering after %s failure",
+    async (stage) => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const f = fixture();
+      const error = new Error(`${stage} setup failed`);
+      const stopped = vi.fn();
+      const render = vi.spyOn(f.scroll, "render");
+      const create = f.create.getMockImplementation();
+      if (!create) throw new Error("Missing component factory");
+      f.create.mockImplementation((options) => {
+        const result = create(options);
+        options.tui.requestRender();
+        if (stage === "create") throw error;
+        if (stage === "get-layout")
+          result.getFullscreenLayout = () => {
+            throw error;
+          };
+        return result;
+      });
+      try {
+        const task = f.run({
+          createTui: (_parent, createDefault) => {
+            const child = stage === "listener" ? new TuiAltScreen(f.parent.terminal) : createDefault();
+            const stop = child.stop.bind(child);
+            vi.spyOn(child, "stop").mockImplementation((options) => {
+              stopped();
+              stop(options);
+            });
+            if (stage === "listener")
+              vi.spyOn(child, "addInputListener").mockImplementation(() => {
+                throw error;
+              });
+            if (stage === "layout") {
+              const layout = child.setLayoutRoot.bind(child);
+              vi.spyOn(child, "setLayoutRoot").mockImplementation((root) => {
+                layout(root);
+                throw error;
+              });
+            }
+            if (stage === "focus")
+              vi.spyOn(child, "setFocus").mockImplementation(() => {
+                throw error;
+              });
+            return child;
+          },
+        });
+        await expect(task).rejects.toThrow(error);
+        await fullscreenMounted();
+        await vi.runOnlyPendingTimersAsync();
+        expect(stopped).toHaveBeenCalledOnce();
+        expect(render).not.toHaveBeenCalled();
+        expect(f.terminal.onInput).toBeDefined();
+        expect(f.terminal.events.every((event) => event.depth === 0)).toBe(true);
+      } finally {
+        f.harness.dispose();
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("preserves failed child setup and its local stop error", async () => {
+    const f = fixture();
+    const setupError = new Error("component setup failed");
+    const stopError = new Error("unreturned child stop failed");
+    f.create.mockImplementation(() => {
+      throw setupError;
+    });
+    const task = f.run({
+      createTui: (_parent, createDefault) => {
+        const child = createDefault();
+        const stop = child.stop.bind(child);
+        vi.spyOn(child, "stop").mockImplementation((options) => {
+          stop(options);
+          throw stopError;
+        });
+        return child;
+      },
+    });
+    await expect(task).rejects.toSatisfy((error: unknown) => {
+      expect(error).toBeInstanceOf(AggregateError);
+      expect((error as AggregateError).errors).toEqual([setupError, stopError]);
+      return true;
+    });
+    expect(f.terminal.onInput).toBeDefined();
+  });
 
   it("aborts root work during factory creation and removes upstream listeners", async () => {
     const f = fixture();

@@ -8,6 +8,7 @@ import {
   TuiAltScreen,
   type TuiInputListener,
 } from "@earendil-works/pi-tui";
+import { createFullscreenHandoff } from "@narumitw/pi-tui-kit/fullscreen-handoff";
 import type { WorkflowOwner } from "./command-configuration.js";
 
 export type SettingsChatFullscreenComponent = Component & {
@@ -70,16 +71,17 @@ export async function runSettingsChatFullscreen<Value>(
         const controller = new AbortController();
         let child: TuiAltScreen | undefined;
         let component: SettingsChatFullscreenComponent | undefined;
-        let overlay: OverlayHandle | undefined;
-        let parentStopped = false;
         let entry: Promise<void> | undefined;
-        let entryDrainStarted = false;
         let finished = false;
         let closing = false;
         let cleanup: Promise<void> | undefined;
         let pasting = false;
         let result: Outcome<Value> = { value: cancelledValue };
         const errors: unknown[] = [];
+        const handoff = createFullscreenHandoff<TuiAltScreen>(parent, {
+          isCurrent: () => !closing && current(),
+          canRestoreParent: canRestoreTerminal,
+        });
         const removers: (() => void)[] = [];
         const attempt = (action: () => void) => {
           try {
@@ -96,37 +98,13 @@ export async function runSettingsChatFullscreen<Value>(
           // Root work must stop synchronously, even when a nested overlay has focus.
           controller.abort();
           cleanup = Promise.resolve().then(async () => {
-            // Do not stop the terminal or start a second drain while entry still
-            // owns the native drain. Its finally block restores the input handler.
             await entry;
-            if (parentStopped) {
-              try {
-                await parent.terminal.drainInput?.();
-              } catch (error) {
-                errors.push(error);
-              }
-            }
-            if (entryDrainStarted && !parentStopped) {
-              // Native drain disables keyboard protocols even if entry is then
-              // cancelled or fails. Reset them through the normal stop/start path.
-              parentStopped = true;
-              attempt(() => parent.stop({ preserveScreen: true }));
-            }
             for (const remove of removers.splice(0)) attempt(remove);
             attempt(() => component?.dispose?.());
-            if (child) attempt(() => child?.stop({ preserveScreen: true }));
-            // Only this interaction's handle can be hidden. Pi's done callback
-            // removes it; calling hide() here would bypass custom's lifecycle.
-            if (parentStopped) {
-              attempt(() => overlay?.setHidden(true));
-              attempt(() => {
-                // Session/tree replacement can keep this physical TUI alive.
-                // Restore its input without calling any stale context UI methods.
-                if (canRestoreTerminal()) {
-                  attempt(() => parent.start());
-                  attempt(() => parent.renderNow(false));
-                }
-              });
+            try {
+              await handoff.restore();
+            } catch (error) {
+              errors.push(error);
             }
             // Return input ownership promptly, then join cancelled root work.
             // A late stream must settle before the owning command releases its draft.
@@ -192,47 +170,46 @@ export async function runSettingsChatFullscreen<Value>(
           },
         };
         mount = (handle) => {
-          overlay = handle;
+          handoff.setOverlayHandle(handle);
           // The custom factory and any active terminal callback must unwind before
           // terminal ownership changes. onHandle runs only after Pi mounts host.
           queueMicrotask(() => {
             if (closing) return;
             entry = (async () => {
               try {
-                if (!current()) {
-                  cancel();
-                  return;
-                }
-                entryDrainStarted = parent.terminal.drainInput !== undefined;
-                await parent.terminal.drainInput?.();
-                if (closing) return;
-                if (!current()) {
-                  cancel();
-                  return;
-                }
-                parentStopped = true;
-                parent.stop({ preserveScreen: true });
-                if (closing) return;
-                const createDefault = () =>
-                  new SettingsChatTui(parent.terminal, parent.getShowHardwareCursor(), undefined, { mouse: true });
-                child = dependencies.createTui?.(parent, createDefault) ?? createDefault();
-                if (child instanceof SettingsChatTui) child.guard = guard;
-                else removers.push(child.addInputListener(guard));
-                component = create({
-                  tui: child,
-                  theme,
-                  keybindings,
-                  signal: controller.signal,
-                  complete: (value) => finish({ value }),
+                child = await handoff.enter(() => {
+                  const createDefault = () =>
+                    new SettingsChatTui(parent.terminal, parent.getShowHardwareCursor(), undefined, { mouse: true });
+                  const created = dependencies.createTui?.(parent, createDefault) ?? createDefault();
+                  child = created;
+                  try {
+                    if (created instanceof SettingsChatTui) created.guard = guard;
+                    else removers.push(created.addInputListener(guard));
+                    component = create({
+                      tui: created,
+                      theme,
+                      keybindings,
+                      signal: controller.signal,
+                      complete: (value) => finish({ value }),
+                    });
+                    if (!closing && current()) {
+                      created.setLayoutRoot(component.getFullscreenLayout?.() ?? component);
+                      created.setFocus(component);
+                    }
+                    return created;
+                  } catch (error) {
+                    controller.abort();
+                    // Kit cannot own a child the factory did not return. Native
+                    // layout setup can schedule rendering before start().
+                    try {
+                      created.stop({ preserveScreen: true });
+                    } catch (cleanupError) {
+                      throw new AggregateError([error, cleanupError], "Fullscreen child factory cleanup failed");
+                    }
+                    throw error;
+                  }
                 });
-                if (closing) return;
-                if (!current()) {
-                  cancel();
-                  return;
-                }
-                child.setLayoutRoot(component.getFullscreenLayout?.() ?? component);
-                child.setFocus(component);
-                child.start();
+                if (!child && !closing) cancel();
               } catch (error) {
                 if (closing) errors.push(error);
                 else finish({ error });

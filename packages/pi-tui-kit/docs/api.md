@@ -13,6 +13,7 @@
 - [Mermaid Markdown transformers](#mermaid-markdown-transformers)
 - [Standard screens](#-standard-screens)
 - [Runtime and mode behavior](#-runtime-and-mode-behavior)
+- [Fullscreen terminal handoff](#fullscreen-terminal-handoff)
 - [Ownership boundary](#-ownership-boundary)
 - [Testing entrypoint](#-supported-testing-entrypoint)
 - [Public API and compatibility history](#-public-api)
@@ -1026,6 +1027,12 @@ The [selector and host-input audit](./core-alignment-audit.md) records native di
 Custom Kit interactions do not currently receive the blocked program-status reporting provided by Pi's native dialogs.
 Kit does not emit terminal program-status codes on Pi's behalf.
 Review screens return no rows for non-positive or non-finite widths and rebuild their display caches on theme invalidation; raw document content remains unchanged.
+
+### Fullscreen terminal handoff
+
+The opt-in `createFullscreenHandoff<T extends TUI>(parent, { isCurrent?, canRestoreParent? })` resource shares only physical terminal entry and restoration. Its methods are `enter(syncChildFactory): Promise<T | undefined>`, `restore(): Promise<void>`, and `setOverlayHandle(handle): void`. The [retained contract matrix and handoff record](./fullscreen-handoff.md) defines lifecycle ordering, error propagation, ownership, two-consumer admission, release requirements, verification evidence, and external limits.
+
+This resource is separate from `runCustomInteraction()`: it does not replace that helper's component lifecycle or typed results. Input routing, paste, root cancellation, domain work, layouts, and non-TUI guards remain consumer-owned. Pi advises against a second renderer; this is an intentional opt-in deviation with one active renderer, not an official support guarantee. Starship and BTW prove the same physical contract through native adapter tests; their domain workflows remain separate.
 
 ## 🧩 Ownership boundary
 

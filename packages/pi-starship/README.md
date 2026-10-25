@@ -165,7 +165,7 @@ The parent TUI is suspended while the chat owns the shared terminal; only one re
 Terminal ownership returns before the existing parent-hosted review, profile-name, and apply-confirmation screens open.
 This intentionally deviates from Pi's guidance not to create a second terminal renderer in an extension: Starship uses a separate fullscreen host for native history scrolling and a fixed dock, with lifecycle tests required for safe ownership transfer.
 It is not a claim of official support or a diagnosis or verified fix of the originally reported wheel/key failure.
-See [Configuration chat runtime](https://github.com/narumiruna/pi-extensions/blob/main/packages/pi-starship/docs/configuration-chat-runtime.md) in the repository for ownership rules, verification evidence, and the maintainer's physical-terminal checklist.
+See [Configuration chat runtime](https://github.com/narumiruna/pi-extensions/blob/main/packages/pi-starship/docs/configuration-chat-runtime.md) in the repository for ownership rules, verification evidence, and the maintainer's physical-terminal checklist. The [shared fullscreen handoff record](https://github.com/narumiruna/pi-extensions/blob/main/packages/pi-tui-kit/docs/fullscreen-handoff.md) records the Kit extraction's two-consumer proof, checks, and physical/release limits; it does not change chat permissions, input policy, or save behavior.
 
 Your chat input, settings and runtime module snapshots read by the agent, local paths, and tool results are sent to the selected model provider.
 Do not include secrets in the draft or conversation.

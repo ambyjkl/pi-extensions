@@ -44,7 +44,7 @@
     "directory": "packages/pi-btw"
   },
   "dependencies": {
-    "@narumitw/pi-tui-kit": "^0.64.0"
+    "@narumitw/pi-tui-kit": "^0.66.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

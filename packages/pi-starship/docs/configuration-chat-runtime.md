@@ -20,6 +20,12 @@ Starship intentionally deviates from that guidance to use a native history viewp
 A separate TUI instance exists, but only one TUI actively owns the shared terminal at a time.
 This requires lifecycle tests; it is not an officially supported integration guarantee, and another extension's implementation is not evidence of safety.
 
+## Shared physical handoff
+
+The Kit `createFullscreenHandoff()` resource extracts terminal entry, drain, stop/start, owned-overlay hiding, and restoration from the local adapter. Starship still owns its single chat component, input priority, paste routing, root cancellation, pending agent work, draft, preview, and save workflow. The parent must be restored before review and save UI opens.
+
+The [shared contract matrix and verification record](https://github.com/narumiruna/pi-extensions/blob/main/packages/pi-tui-kit/docs/fullscreen-handoff.md) records admission with BTW's multi-screen flow, regression and artifact evidence, dependency-floor propagation, and exact-artifact release guards. The earlier verification below applies to the original Starship-owned host and does not replace the shared implementation's record. The official-renderer deviation above remains unchanged.
+
 ## Layout and ownership
 
 History is the primary `ScrollView` under a `VStack` layout root, not a focused overlay that intercepts viewport input.

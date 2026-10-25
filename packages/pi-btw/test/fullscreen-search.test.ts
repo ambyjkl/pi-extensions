@@ -3,7 +3,7 @@ import { stripVTControlCharacters } from "node:util";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { initTheme } from "@earendil-works/pi-coding-agent";
 import { type Component, getKeybindings, type TUI, TuiAltScreen } from "@earendil-works/pi-tui";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 import { runBtwFullscreen } from "../src/fullscreen-ui.js";
 import type { SideTranscriptItem } from "../src/side-thread.js";
 import { BtwAnsweringView, BtwTranscriptPager } from "../src/transcript-pager.js";
@@ -118,8 +118,12 @@ function createSearchHarness(rows = 14) {
   };
 }
 
-async function flushAsyncWork(): Promise<void> {
-  await new Promise<void>((resolve) => setImmediate(resolve));
+async function flushAsyncWork(current: () => TUI | undefined): Promise<void> {
+  await vi.waitFor(() => {
+    const tui = current();
+    assert.ok(tui instanceof TuiAltScreen, "native side TUI must be created");
+    assert.ok(tui.getFocusedComponent(), "side component must be mounted");
+  });
 }
 
 function readSearchStatus(writes: readonly string[]): { index: number; count: number } {
@@ -179,7 +183,7 @@ test.each(cases)(
         });
       }),
     );
-    await flushAsyncWork();
+    await flushAsyncWork(() => sideTui);
     assert.ok(sideTui);
     sideTui.renderNow(true);
 

@@ -42,6 +42,10 @@
       "types": "./dist/editor-status-widget.d.ts",
       "import": "./dist/editor-status-widget.js"
     },
+    "./fullscreen-handoff": {
+      "types": "./dist/fullscreen-handoff.d.ts",
+      "import": "./dist/fullscreen-handoff.js"
+    },
     "./interaction-hints": {
       "types": "./dist/interaction-hints.d.ts",
       "import": "./dist/interaction-hints.js"

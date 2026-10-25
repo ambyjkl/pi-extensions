@@ -70,7 +70,7 @@ Otherwise an existing npm lock can retain an older Kit that lacks the required s
 Each consumer owns its compatibility range.
 Review the APIs each extension imports and keep its tested minimum instead of synchronizing every consumer with the current Kit version.
 Pi TUI Kit and its consumers version independently through Changesets.
-Publish a new Kit API before raising a consumer's compatibility floor.
+A new Kit API and its consumers can share a Version PR only when Kit publishes first and its exact registry artifact is verified before dependent publication; otherwise release Kit before consumer adoption.
 Declare Kit in that consumer so local hoisting cannot hide an incompatible or missing published dependency.
 
 The default-aware selectors use an explicit API-admission exception for two convergent selection flows requested by the maintainer. Consumer migrations remain deferred, and each consumer retains default-setting persistence.
@@ -122,6 +122,8 @@ The benchmark reports medians, median absolute deviations, resolved package URLs
 Each interaction subpath scenario fails if its cold import reaches the package root, menu runtime, or an unrelated heavy component or dependency graph.
 
 ## 📚 API guide
+
+The opt-in [`createFullscreenHandoff()` resource](./docs/fullscreen-handoff.md) shares physical terminal lifecycle, not input or domain state. Its contract record includes both consumer proofs, release guards, and physical-terminal limits. Ordinary menus and `runCustomInteraction()` are unchanged.
 
 The [API reference](./docs/api.md) contains the complete examples and contracts:
 
