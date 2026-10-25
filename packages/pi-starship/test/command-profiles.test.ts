@@ -123,6 +123,29 @@ test("profile selection previews exact candidates without active writes or recov
   }
 });
 
+test("profile actions prioritize apply, then review, edit, duplicate, rename, and delete", async () => {
+  const f = fixture();
+  createProfile(f.path, "Alpha", "format = 'alpha'\n");
+  try {
+    const running = showProfiles(f.ctx, f.options, f.owner, f.inertApply);
+    await openProfile(f.tui);
+    const frame = f.tui.render().join("\n");
+    assert.match(frame, /→ Apply…/u);
+    const labels = ["Apply…", "Review TOML", "Edit TOML…", "Duplicate…", "Rename…", "Delete…"];
+    const positions = labels.map((label) => frame.indexOf(label));
+    assert.ok(
+      positions.every((position, index) => position >= 0 && (index === 0 || position > (positions[index - 1] ?? -1))),
+    );
+    await action(f.tui, 1);
+    assert.match(f.tui.render().join("\n"), /read-only/u);
+    f.tui.press("ctrl+c");
+    await running;
+    assert.equal(existsSync(f.path), false);
+  } finally {
+    f.cleanup();
+  }
+});
+
 test("profile application remains disabled while active settings require explicit recovery", async () => {
   const f = fixture();
   writeFileSync(f.path, "format = [\n");
@@ -132,7 +155,6 @@ test("profile application remains disabled while active settings require explici
     await openProfile(f.tui);
     const frame = f.tui.render().join("\n");
     assert.match(frame, /Apply…/u);
-    f.tui.press("tui.select.down");
     assert.match(f.tui.render().join("\n"), /Repair active settings or use explicit recovery first/u);
     f.tui.press("tui.select.confirm");
     f.tui.press("ctrl+c");
@@ -270,7 +292,6 @@ test("malformed profiles stay visible, never preview fallback, and can continue 
     const running = showProfiles(f.ctx, f.options, f.owner, f.inertApply);
     await openProfile(f.tui);
     assert.ok(f.previews.every((raw) => raw === undefined));
-    f.tui.press("tui.select.down");
     assert.match(f.tui.render().join("\n"), /Invalid TOML cannot be applied/u);
     await action(f.tui, 2);
     assert.match(f.tui.render().join("\n"), /Profile draft needs attention/u);
@@ -302,12 +323,12 @@ test("rename and duplicate preserve bytes; delete names the exact saved path and
   try {
     const running = showProfiles(f.ctx, f.options, f.owner, f.inertApply);
     await openProfile(f.tui);
-    await action(f.tui, 3);
+    await action(f.tui, 4);
     assert.match(f.tui.render().join("\n"), /→ Renamed/u);
     assert.equal(readProfile(f.path, "Renamed").rawDocument, raw);
     f.tui.press("tui.select.confirm");
     await f.tui.waitForOpen();
-    await action(f.tui, 4);
+    await action(f.tui, 3);
     assert.equal(readProfile(f.path, "Copy").rawDocument, raw);
     assert.match(f.tui.render().join("\n"), /→ Renamed/u);
     await openProfile(f.tui);
@@ -351,7 +372,7 @@ test("changed profile snapshots block pending rename, duplicate, delete, and dra
       const running = showProfiles(f.ctx, f.options, f.owner, f.inertApply);
       await openProfile(f.tui);
       f.tui.press("home");
-      const index = { rename: 3, duplicate: 4, delete: 5, edit: 2 }[operation];
+      const index = { rename: 4, duplicate: 3, delete: 5, edit: 2 }[operation];
       for (let i = 0; i < index; i += 1) f.tui.press("tui.select.down");
       f.tui.press("tui.select.confirm");
       await entered.promise;
@@ -423,7 +444,7 @@ test("apply delegates guarded ownership, adopts its own successful revision, and
       return "applied";
     });
     await openProfile(f.tui);
-    await action(f.tui, 1);
+    await action(f.tui, 0);
     assert.match(f.tui.render().join("\n"), /Matches active settings/u);
     f.tui.press("tui.select.cancel");
     assert.equal(await running, "back");
@@ -670,7 +691,7 @@ test("apply source guard reports changed candidates without classifying the sess
       return "stay";
     });
     await openProfile(f.tui);
-    await action(f.tui, 1);
+    await action(f.tui, 0);
     assert.match(f.notifications.at(-1)?.message ?? "", /selected document changed/u);
     assert.equal(existsSync(f.path), false);
     f.tui.press("ctrl+c");
@@ -720,7 +741,7 @@ test("malformed profile duplication copies raw TOML and retains its original cur
   try {
     const running = showProfiles(f.ctx, f.options, f.owner, f.inertApply);
     await openProfile(f.tui);
-    await action(f.tui, 4);
+    await action(f.tui, 3);
     assert.equal(readProfile(f.path, "Broken copy").rawDocument, raw);
     assert.match(f.tui.render().join("\n"), /→ Broken\s/u);
     assert.ok(f.previews.every((item) => item === undefined));
@@ -753,7 +774,7 @@ test("draft Escape continues editing; discard and disposal never publish a draft
           f.tui.press("tui.select.cancel");
           await f.tui.waitForOpen();
           assert.equal(drafts[1], "# draft\nformat = 'draft'\n");
-        } else await action(f.tui, 4);
+        } else await action(f.tui, 3);
         f.tui.press("ctrl+c");
         await running;
       }
@@ -838,7 +859,7 @@ test("invalid UTF-8 profiles remain visible beside valid profiles and duplicate/
     await openProfile(f.tui);
     assert.match(f.tui.render().join("\n"), /not valid UTF-8/u);
     assert.ok(f.previews.every((raw) => raw === undefined));
-    await action(f.tui, 4);
+    await action(f.tui, 3);
     const copy = readProfile(f.path, "Raw copy");
     assert.equal(copy.rawDocument, undefined);
     assert.deepEqual(readFileSync(copy.path), bytes);

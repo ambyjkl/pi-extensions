@@ -57,7 +57,6 @@ test("the main-menu profile apply adopts its own revision and preserves the prev
     assert.equal(previewed.at(-1), next);
     tui.press("tui.select.confirm");
     await tui.waitForOpen();
-    tui.press("tui.select.down");
     tui.press("tui.select.confirm");
     await tui.waitForOpen();
     assert.match(tui.render().join("\n"), /work profile preview/u);
