@@ -423,11 +423,8 @@ export async function resolveUsageAuth(
 
   const model = candidateModels(ctx, adapter.id).find((candidate) => hasOfficialOrigin(candidate, adapter.id));
   if (!model) return undefined;
-  if (
-    ["github-copilot", "openai", "xai"].includes(adapter.id) &&
-    candidateReader?.waitUntilReady &&
-    !(await guard.wait(() => candidateReader.waitUntilReady?.(ctx, adapter.id)))
-  ) {
+  // Pending activation can replace runtime keys or headers even without an OAuth credential offer.
+  if (candidateReader?.waitUntilReady && !(await guard.wait(() => candidateReader.waitUntilReady?.(ctx, adapter.id)))) {
     throw new Error(`${adapter.displayName} OAuth credential readiness failed closed.`);
   }
   // SAFETY: Pi exposes the required auth methods at runtime, and checks below narrow them before use.

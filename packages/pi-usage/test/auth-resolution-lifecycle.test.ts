@@ -4,7 +4,7 @@ import { createMockContext } from "../../../test/support.js";
 import { createUsageAuthGuard } from "../src/auth-resolution-guard.js";
 import type { OAuthCredentialCandidateReader } from "../src/oauth-credential-source.js";
 import { OPENAI_CHATGPT_ADAPTER } from "../src/providers/openai-chatgpt.js";
-import { resolveUsageAuth } from "../src/query.js";
+import { adapterForProvider, resolveUsageAuth } from "../src/query.js";
 
 const native = {
   type: "oauth",
@@ -110,6 +110,87 @@ for (const boundary of boundaries) {
         await pending;
         await new Promise<void>((resolve) => setImmediate(resolve));
         assert.deepEqual(trace, before);
+      } finally {
+        release();
+        await pending;
+      }
+    });
+  }
+}
+
+for (const model of [
+  { provider: "openrouter", id: "fixture", name: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1" },
+  { provider: "openai-codex", id: "fixture", name: "Codex", baseUrl: "https://chatgpt.com/backend-api/codex" },
+  { provider: "kimi-coding", id: "fixture", name: "Kimi", baseUrl: "https://api.kimi.com/coding" },
+]) {
+  for (const completion of ["success", "cancel", "superseded", "not-ready"] as const) {
+    test(`${model.provider} readiness handles ${completion} before resolving runtime auth`, async () => {
+      const adapter = adapterForProvider(model.provider);
+      assert.ok(adapter);
+      const controller = new AbortController();
+      let current = true;
+      let release!: () => void;
+      const blocked = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const trace: string[] = [];
+      const getProviderAuth = vi.fn(async () => {
+        trace.push("provider auth");
+        return { auth: { apiKey: "runtime-second" } };
+      });
+      const getApiKeyAndHeaders = vi.fn(async () => {
+        trace.push("model auth");
+        return { ok: true, apiKey: "runtime-second" };
+      });
+      const ctx = createMockContext({
+        model,
+        modelRegistry: {
+          getAll: () => [model],
+          getAvailable: () => [model],
+          getProviderAuth,
+          getApiKeyAndHeaders,
+        },
+      }).ctx;
+      const reader: OAuthCredentialCandidateReader = () => ({ ok: true, candidates: [] });
+      reader.waitUntilReady = async (_ctx, providerId) => {
+        trace.push(`readiness:${providerId}`);
+        await blocked;
+        return completion !== "not-ready";
+      };
+      const pending = resolveUsageAuth(ctx, adapter, undefined, () => undefined, reader, undefined, {
+        signal: controller.signal,
+        checkCurrent() {
+          if (!current) throw Object.assign(new Error("Selection superseded"), { name: "AbortError" });
+        },
+      }).then(
+        (auth) => ({ auth, error: undefined }),
+        (error: Error) => ({ auth: undefined, error }),
+      );
+      try {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.deepEqual(trace, [`readiness:${model.provider}`]);
+        if (completion === "cancel") controller.abort();
+        else {
+          if (completion === "superseded") current = false;
+          release();
+        }
+        // Cancellation must settle this waiter without releasing the shared activation.
+        const result = await pending;
+        if (completion === "success") {
+          assert.equal(result.auth?.apiKey, "runtime-second");
+          assert.equal(result.error, undefined);
+          assert.equal(getProviderAuth.mock.calls.length, 1);
+        } else {
+          assert.equal(result.auth, undefined);
+          assert.equal(getProviderAuth.mock.calls.length, 0);
+          assert.equal(getApiKeyAndHeaders.mock.calls.length, 0);
+          if (completion === "not-ready") assert.match(result.error?.message ?? "", /readiness failed closed/);
+          else assert.equal(result.error?.name, "AbortError");
+        }
+        const settledTrace = [...trace];
+        release();
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.deepEqual(trace, settledTrace, "late readiness must not resume stale auth work");
       } finally {
         release();
         await pending;
