@@ -1,6 +1,6 @@
 {
   "name": "@narumitw/pi-codex-imagegen",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Experimental Pi image generation through the Codex image endpoint, without a Codex agent.",
   "type": "module",
   "license": "MIT",
@@ -30,7 +30,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@narumitw/pi-tui-kit": "^0.66.0"
+    "@narumitw/pi-tui-kit": "^0.67.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",

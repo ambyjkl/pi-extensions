@@ -1,5 +1,12 @@
 # @narumitw/pi-usage
 
+## 0.68.2
+
+### Patch Changes
+
+- Updated dependencies [57eeae7]
+  - @narumitw/pi-tui-kit@0.67.0
+
 ## 0.68.1
 
 ### Patch Changes

@@ -1,5 +1,12 @@
 # @narumitw/pi-sync
 
+## 0.57.5
+
+### Patch Changes
+
+- Updated dependencies [57eeae7]
+  - @narumitw/pi-tui-kit@0.67.0
+
 ## 0.57.4
 
 ### Patch Changes

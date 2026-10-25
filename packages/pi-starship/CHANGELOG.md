@@ -1,5 +1,16 @@
 # @narumitw/pi-starship
 
+## 0.64.1
+
+### Patch Changes
+
+- 57eeae7: Add the opt-in `createFullscreenHandoff()` resource and native test harness. Share terminal entry/exit drain, cancellation-safe restoration, keyboard-protocol recovery, owned overlay handling, and cleanup errors through public Pi TUI APIs. Keep ordinary Kit interactions unchanged.
+  
+  Use the resource in Starship's configuration chat and BTW's multi-screen workspace. Keep each extension's input policy, layouts, domain state, permissions, and persistence local. BTW now waits for native input drain before entry. Changesets raises both consumer floors to the Kit API release; dependent publication requires its exact registry artifact.
+- b46fd49: Put Apply first in profile actions, followed by Review TOML, Edit TOML, Duplicate, Rename, and Delete. Keep the apply confirmation and History action order unchanged.
+- Updated dependencies [57eeae7]
+  - @narumitw/pi-tui-kit@0.67.0
+
 ## 0.64.0
 
 ### Minor Changes
