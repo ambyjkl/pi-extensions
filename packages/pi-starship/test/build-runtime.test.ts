@@ -204,8 +204,7 @@ test("generated runtime is loadable by Pi's Jiti resource loader", async () => {
           return response([
             {
               type: "text",
-              text:
-                "Generated chat ready\n" + Array.from({ length: 120 }, (_, row) => `generated-row-${row}`).join("\n"),
+              text: `Generated chat ready\n${Array.from({ length: 120 }, (_, row) => `generated-row-${row}`).join("\n")}`,
             },
           ]);
         };
