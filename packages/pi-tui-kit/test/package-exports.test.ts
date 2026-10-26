@@ -210,7 +210,7 @@ test("built package entrypoints resolve their documented exports", async (t) => 
     path.join(fixture, "tsconfig.json"),
     JSON.stringify({
       compilerOptions: {
-        target: "ES2022",
+        target: "ES2024",
         module: "NodeNext",
         moduleResolution: "NodeNext",
         strict: true,

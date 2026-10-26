@@ -90,7 +90,7 @@ export async function buildBrowserAssets({
       outfile: join(staging, "app.js"),
       platform: "browser",
       format: "esm",
-      target: "es2022",
+      target: "es2024",
       minify: true,
       define: { "process.env.NODE_ENV": '"production"' },
       legalComments: "eof",
