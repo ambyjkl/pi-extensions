@@ -15,7 +15,7 @@ flowchart TD
     PR -. "Merge produces a new push to main" .-> Trigger
     Mode -->|publish| Plan["Publish-plan artifact"]
     Plan --> Pack["Pack job: npm ci and npm run build"]
-    Pack --> Tarballs["Pack packages using the publish plan"]
+    Pack --> Tarballs["Pack existing build output with lifecycle scripts disabled"]
     Tarballs --> Artifact["Packed packages artifact"]
     Artifact --> Publish["Publish job: npm ci and download packed packages"]
     Publish --> Native["npm run publish-packages -- --from-pack-dir DIRECTORY"]
@@ -35,6 +35,8 @@ flowchart TD
 | `publish` | Download the artifact and invoke native Changesets artifact publication with npm provenance enabled. |
 
 Each non-CI job checks out the repository, sets up Node.js, and runs `npm ci`. The publish job does not repeat CI checks or tests.
+
+The pack job completes `npm run build` before packing. Only the **Pack packages** step sets `NPM_CONFIG_IGNORE_SCRIPTS=true`, so native Changesets packs the existing output without running `prepack`, `prepare`, or `postpack` hooks. Changesets can pack dependencies and consumers concurrently; a second Kit build can delete `dist` while a consumer compiles against it. Dependency installation and the explicit build keep their normal script behavior. Package-level hooks remain available for direct `npm pack` commands.
 
 ## Publication and failures
 
