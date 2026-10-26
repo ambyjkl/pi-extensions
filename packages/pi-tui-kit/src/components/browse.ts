@@ -148,7 +148,7 @@ export function createBrowseComponent<ScreenId extends string, ActionId extends 
     const previousIndex = filteredItems.findIndex((candidate) => candidate.item.id === previouslySelectedId);
     if (previousIndex < 0 && previouslySelectedId) restoreItemId ??= previouslySelectedId;
     const restoreIndex = filteredItems.findIndex((candidate) => candidate.item.id === restoreItemId);
-    const nextIndex = restoreIndex >= 0 ? restoreIndex : previousIndex >= 0 ? previousIndex : 0;
+    const nextIndex = restoreIndex >= 0 ? restoreIndex : Math.max(previousIndex, 0);
     if (restoreIndex >= 0) restoreItemId = undefined;
     setSelectedIndex(nextIndex, false, false);
   };
