@@ -1,5 +1,11 @@
 # @narumitw/pi-codex-compact
 
+## 0.56.3
+
+### Patch Changes
+
+- 6b89b6a: Deduplicate Remote V2 compaction items independently of JSON object-key order while still rejecting differences in content or other fields.
+
 ## 0.56.2
 
 ### Patch Changes
