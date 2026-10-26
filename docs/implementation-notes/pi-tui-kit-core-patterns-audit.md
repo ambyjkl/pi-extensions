@@ -1,5 +1,7 @@
 # Pi TUI Kit core-pattern audit
 
+Historical audit: 2026-10-14. The decisions, benchmark samples, and verification results below describe that change, not a new test run or current performance guarantee. Later host-key and shared-helper work is recorded in the [package-owned alignment audits](../../packages/pi-tui-kit/docs/core-alignment-audit.md).
+
 Retain the TaskLoader theme and width fixes and correct the SettingsList capability comment. Defer Markdown instance retention, Input composition changes, and macOS hint conversion. Public exports, dependencies, input presentation, settings behavior, and lifecycle ownership remain unchanged.
 
 ## Baseline and applicable rules
@@ -58,7 +60,7 @@ Each cell below is median milliseconds ± median absolute deviation, for eight o
 | Tables/alternating width | 102.29 ± 1.42 | 97.59 ± 0.46 | 103.75 ± 0.34 | 109.13 ± 9.22 | Yes |
 | Tables/theme invalidation | 110.22 ± 0.88 | 106.72 ± 0.71 | 109.53 ± 0.72 | 109.68 ± 3.15 | No |
 
-SHA-256 covers complete styled output, search lines, wrap metadata, and table reading-order sources. Theme hashes differed because Markdown's defaultStylePrefix retains the old color around inline-style transitions even after public invalidate. Resetting that private field is not acceptable. Recreating the component on invalidation would remove the measured invalidation benefit and needs separate evidence; it is not retained as a speculative workaround. All six final hashes match the original baseline. Raw samples, dispersion, hashes, and Input probe output are in `2026-10-14_pi-tui-kit-core-patterns-evidence.json` beside this note.
+SHA-256 covers complete styled output, search lines, wrap metadata, and table reading-order sources. Theme hashes differed because Markdown's defaultStylePrefix retains the old color around inline-style transitions even after public invalidate. Resetting that private field is not acceptable. Recreating the component on invalidation would remove the measured invalidation benefit and needs separate evidence; it is not retained as a speculative workaround. All six final hashes match the original baseline. Raw samples, dispersion, hashes, and Input probe output are in [pi-tui-kit-core-patterns-evidence.json](./pi-tui-kit-core-patterns-evidence.json) beside this note.
 
 No cache code is retained. Existing exact text/code/diff, search coordinates, table reading order, Mermaid widths, RPC pagination, and lazy-loading behavior stay on their existing implementation and regression gates. Optimization timing is host-dependent and is not a deterministic acceptance threshold.
 
@@ -97,4 +99,4 @@ The final diff audit covers correctness, security, lifecycle safety, compatibili
 
 The only verification-scope addition is the progress-menu test's wrapped-path assertion, needed to run the complete gate on long temporary paths; it adds no published behavior or Changeset. All other retained files belong to the specified five-candidate evaluation, loader correction, release scope, or evidence. The cache prototype is absent from the final diff. Input and key-hint behavior stay unchanged, and the three deferrals are the evidence-gated outcomes authorized by the plan.
 
-All plan tasks and completion criteria have evidence above. Delete `docs/plans/2026-10-14_pi-tui-kit-core-patterns-plan.md` after the handoff audit and report that path. No publication, visibility change, version tag, or release workflow is performed.
+All plan tasks and completion criteria have evidence above. The completed plan was removed after the handoff audit. No publication, visibility change, version tag, or release workflow was performed.
