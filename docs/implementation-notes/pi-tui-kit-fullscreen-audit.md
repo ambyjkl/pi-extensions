@@ -1,5 +1,7 @@
 # Pi TUI Kit fullscreen compatibility audit
 
+Historical audit: 2026-10-08. The baseline, decisions, and verification results below describe that change; later corrections are identified separately. Use the [current Kit API reference](../../packages/pi-tui-kit/docs/api.md#fullscreen-input-and-custom-ui-limits) for present limits.
+
 The retained changes fix interaction cleanup races, stale error notifications, and zero-width review rendering. Overlay and viewport APIs are deferred; existing exports, consumer floors, domain ownership, and RPC adapters remain unchanged.
 
 ## Evidence baseline
@@ -29,7 +31,9 @@ Production changes do not import or inspect these implementation paths. Tests us
 | `pi-starship/src/command-preview.ts` | Bounded preview and actions, independent selection/document scrolling, distinct cancellation, and caller-owned preview state | Current replacement flow has no demonstrated overlay requirement |
 | `pi-recall/src/menu.ts` | Scoped picker with initial query/selection, typed result, ownership signal, and RPC adaptation | Existing replacement flow does not establish a matching overlay lifecycle need |
 
-There are not two compatible overlay consumers, and no exception was requested. No new overlay options or public testing API are added. Pi's custom overlay close path also uses the top overlay rather than an extension-owned handle; a future API must establish unrelated-overlay preservation before admission. The existing focused-overlay test characterizes public renderer behavior without promising nested custom-dialog safety.
+At this baseline, there were not two compatible overlay consumers, and no exception was requested. This change added no overlay options or public testing API. Pi's custom overlay close path then used the top overlay rather than an extension-owned handle, so unrelated-overlay preservation remained an admission requirement. The focused-overlay test characterized public renderer behavior without promising nested custom-dialog safety.
+
+The top-overlay close defect was subsequently fixed upstream: the installed host closes its own overlay handle. That historical defect is not a current admission blocker. Kit later added the separate [physical-terminal handoff resource](../../packages/pi-tui-kit/docs/fullscreen-handoff.md), shared by Starship and BTW, with a public testing harness. It does not add generic overlay options to `runCustomInteraction()` or replace document viewports.
 
 ### Document viewport adapter: no-go for this iteration
 
@@ -90,7 +94,7 @@ Applicable guides: `docs/extension-conventions.md`, `docs/readme-conventions.md`
 
 ## PR review ledger
 
-PR #1513 belongs to this checkout's `narumiruna/pi-extensions` origin and remains open on the original branch. All review, inline-comment, conversation, and thread pages were fetched, including the repeat review; there are two substantive findings. The complete original diff is unchanged from the audit above, and the original commit's CI passed. Relevant instructions are unchanged and were reread.
+PR #1513 belonged to this checkout's `narumiruna/pi-extensions` origin and merged through commit `657cc683` on 2026-10-08. This ledger records the original review, not a current GitHub status check. All review, inline-comment, conversation, and thread pages were fetched during that review, including the repeat review; there were two substantive findings. The original commit's CI passed, and the relevant instructions were reread.
 
 | Item | Independent evidence, scope, and severity | Outcome |
 | --- | --- | --- |
