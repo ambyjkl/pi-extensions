@@ -268,7 +268,7 @@ function createChoiceComponent<ScreenId extends string, ActionId extends string>
     const previousIndex = filteredItems.findIndex(({ item }) => item.id === previouslySelectedId);
     if (previousIndex < 0 && previouslySelectedId) restoreItemId ??= previouslySelectedId;
     const restoreIndex = filteredItems.findIndex(({ item }) => item.id === restoreItemId);
-    selectedIndex = restoreIndex >= 0 ? restoreIndex : previousIndex >= 0 ? previousIndex : 0;
+    selectedIndex = restoreIndex >= 0 ? restoreIndex : Math.max(previousIndex, 0);
     if (restoreIndex >= 0) restoreItemId = undefined;
     list = createList();
     const item = selected();
