@@ -21,7 +21,7 @@ This is not a separately published package. It needs the repository's installed 
 
 ## Commands
 
-1. `/skills` opens Browse installed skills, Add from GitHub, Remove skills, Move skills, Scan custom directory, Help, and Close.
+1. `/skills` opens Manage installed skills, Add from GitHub, Remove skills, Move skills, Scan custom directory, Help, and Close.
 2. `/skills add` asks for a public GitHub repository.
 3. `/skills add narumiruna/skills` discovers repository skills directly.
 4. `/skills remove` selects exact local paths for permanent removal.
@@ -65,9 +65,13 @@ Custom registration is part of the final review. Project-relative paths are rela
 
 Only native Pi resource settings are written; there is no extension settings file or separate loader. Disabling the extension leaves installed skills and custom registrations intact. Removing the last child does not remove its container registration.
 
-## Browse, remove, and move
+## Manage, remove, and move
 
-Browse reports detected-on-disk skills from the four supported roots and concrete configured custom roots. Scan custom directory can inspect another container, including a previous Copy only destination. This is not a complete list of currently loaded Pi resources. Identical names remain separate path-keyed rows, and name conflicts are warnings rather than a replacement policy. Pi keeps its own discovery precedence.
+Manage installed skills uses a searchable choice list. Selecting a skill opens Move, Remove, Copy directory path, and Back actions, not a `SKILL.md` detail page. The action menu shows its scope, exact path, warnings, and read-only reasons. Back returns to the previous selected row. Protected skills stay selectable, but their mutation actions are disabled. The top-level Remove and Move actions remain available for multi-selection; per-skill actions use the same preparation and final confirmation.
+
+Copy directory path is TUI-only and uses Pi's public clipboard helper; RPC shows the unavailable reason and never invokes that helper. It sends the exact raw directory path, including characters hidden by the terminal preview. For a standalone Markdown skill, it copies the enclosing directory. Copy does not edit files, run the skill, or close the action menu. Pi's clipboard API has no abort signal: accepted writes can finish after cancellation, while the flow drains the work and suppresses stale feedback. A successful dispatch does not prove that a remote terminal accepted OSC 52 clipboard content. Physical clipboard delivery remains part of the terminal handoff.
+
+The manager reports detected-on-disk skills from the four supported roots and concrete configured custom roots. Scan custom directory can inspect another container, including a previous Copy only destination. This is not a complete list of currently loaded Pi resources. Identical names remain separate path-keyed rows, and name conflicts are warnings rather than a replacement policy. Pi keeps its own discovery precedence.
 
 Remove confirms an exact list of directories and deletes complete selected bundles, never their container or unrelated siblings. Locally malformed `SKILL.md` directories remain visible and removable. Removal is permanent; it does not erase skill instructions already present in the conversation.
 
@@ -103,7 +107,7 @@ npm run check
 npm test
 ```
 
-Root checks do not automatically discover this local test suite. Tests and smokes use temporary directories, injected failures, mocked GitHub transport, Kit public harnesses, and Pi's Jiti resource loader. The RPC smoke uses isolated agent/home directories, no credentials, and no model requests; it verifies explicit loading, trusted-project auto-discovery, lazy menu loading, actual removal, command-triggered reload, and ordinary message-prefix stability.
+Root checks do not automatically discover this local test suite. Tests and smokes use temporary directories, injected failures, mocked GitHub transport, Kit public harnesses, and Pi's Jiti resource loader. The RPC smoke uses isolated agent/home directories, no credentials, and no model requests; it verifies explicit loading, trusted-project auto-discovery, lazy menu loading, per-skill actions, actual removal, command-triggered reload, and ordinary message-prefix stability.
 
 See [verification and terminal handoff](./verification.md) for completed evidence, intentional limits, and remaining physical-terminal checks.
 

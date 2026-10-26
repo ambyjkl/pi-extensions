@@ -71,6 +71,7 @@ describe("inventory", () => {
     expect(result.skills).toHaveLength(4);
     expect(new Set(result.skills.map((entry) => entry.path)).size).toBe(4);
     expect(result.skills.every((entry) => entry.name === "duplicate")).toBe(true);
+    expect(result.skills.every((entry) => entry.directoryPath === entry.path)).toBe(true);
     expect(result.warnings.join("\n")).toContain("Duplicate declared name");
   });
   it("finds nested bundles, malformed skills and standalone native Markdown without making Markdown writable", async () => {
@@ -85,6 +86,8 @@ describe("inventory", () => {
     expect(broken.warnings.length).toBeGreaterThan(0);
     const markdown = required(result.skills.find((entry) => entry.path.endsWith(".md")));
     expect(markdown.readOnlyReason).toContain("Standalone");
+    expect(markdown.directoryPath).toBe(source.path);
+    expect(broken.directoryPath).toBe(path);
     const remove = await engine.prepareOperation({ kind: "remove", skills: [broken, markdown] }, guard);
     expect((await remove.apply(guard)).map((item) => item.status)).toEqual(["removed", "skipped"]);
     expect(await exists(source.path)).toBe(true);

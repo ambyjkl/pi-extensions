@@ -1,4 +1,4 @@
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { copyToClipboard, type ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { defineMenu, runMenu, runTask } from "@narumitw/pi-tui-kit";
 import { sanitizeTerminalText as safe } from "@narumitw/pi-tui-kit/terminal-text";
 import type { Route } from "./command.ts";
@@ -25,7 +25,8 @@ export const HELP = [
   "Complete directories are copied. References outside each selected bundle are not copied or rewritten.",
   "Project means the current Pi working directory. Shared locations can also be read by compatible agents.",
   "Existing destinations are skipped; duplicate names can still conflict under Pi's native discovery rules.",
-  "Browse lists scanned local locations, not every loaded Pi resource. Linked, standalone, ancestor, and package-cache resources are read-only.",
+  "Manage installed skills opens per-skill actions for scanned local locations, not every loaded Pi resource. Protected resources remain read-only.",
+  "Single-skill Move and Remove reuse batch confirmation. Copy directory path sends the exact raw path to the clipboard in TUI only.",
   "Custom paths can be registered in native project/user skills settings, or copied without registration.",
   "Before confirmation, cancellation changes no installed skills or settings. Confirmed batches can finish partially.",
   "Do not run concurrent mutations from separate Pi processes. External filesystem edits are not locked.",
@@ -41,6 +42,7 @@ export const defaultServices = {
   customLocation,
   previewRegistration,
   applyRegistration,
+  copyToClipboard,
 };
 export type Services = typeof defaultServices;
 
@@ -55,7 +57,8 @@ type Screen =
   | "registration"
   | "ready"
   | "review"
-  | "browse"
+  | "manage"
+  | "skill-actions"
   | "help"
   | "inventory-path"
   | "inventory-ready";
@@ -71,7 +74,13 @@ type Action =
   | "prepare"
   | "confirm"
   | "inventory-path"
-  | "scan";
+  | "scan"
+  | "manage-skill"
+  | "move-one"
+  | "remove-one"
+  | "copy-directory"
+  | "manage-scan"
+  | "back";
 
 interface State {
   mode: OperationRequest["kind"];
@@ -87,7 +96,9 @@ interface State {
   batch?: PreparedBatch;
   confirmed: boolean;
   extra?: Location;
-  afterScan: "browse" | "select";
+  afterScan: "manage" | "select";
+  managedId?: string;
+  copyMessage?: string;
 }
 
 function actionGuard(owner: Guard, signal: AbortSignal): Guard {
@@ -128,8 +139,8 @@ function selectionItems(state: State, rpc: boolean) {
   }));
 }
 
-function browseItems(state: State, rpc: boolean, selectedOnly = false) {
-  if (selectedOnly && state.mode === "add") {
+function previewItems(state: State, rpc: boolean) {
+  if (state.mode === "add") {
     return (state.repository?.skills ?? [])
       .filter((skill) => state.selected.has(skill.id))
       .map((skill) => ({
@@ -141,7 +152,7 @@ function browseItems(state: State, rpc: boolean, selectedOnly = false) {
       }));
   }
   return state.inventory.skills
-    .filter((skill) => !selectedOnly || state.selected.has(skill.id))
+    .filter((skill) => state.selected.has(skill.id))
     .map((skill) => ({
       id: skill.id,
       label: `${safe(skill.name)} · ${safe(skill.location.label)}${rpc ? ` · ${safe(skill.path)}` : ""}`,
@@ -163,6 +174,25 @@ export function createSkillsMenu(
   mode: ExtensionCommandContext["mode"] = "tui",
 ) {
   const rpc = mode === "rpc";
+  const managedSkill = () => state.inventory.skills.find((skill) => skill.id === state.managedId);
+  const selectManaged = (operation: "remove" | "move") => {
+    owner.check();
+    const skill = managedSkill();
+    if (!skill) throw new Error("Choose an installed skill");
+    if (skill.readOnlyReason) throw new Error(skill.readOnlyReason);
+    state.mode = operation;
+    state.selected = new Set([skill.id]);
+    state.batch = undefined;
+    state.target = undefined;
+    state.registration = undefined;
+    state.registrationScope = "none";
+  };
+  const prepareRemoval = async (guard: Guard) => {
+    const batch = await services.prepareOperation({ kind: "remove", skills: selectedLocals(state) }, guard);
+    guard.check();
+    state.batch = batch;
+    return { kind: "to" as const, screen: "review" as const };
+  };
   return defineMenu<State, Screen, Action>({
     start,
     screens: {
@@ -172,11 +202,11 @@ export function createSkillsMenu(
         lines: [`Workspace: ${safe(env.cwd)}`, ...state.warnings],
         hint: "close",
         items: [
-          { id: "browse", label: "Browse installed skills", to: "browse" },
+          { id: "manage", label: "Manage installed skills", to: "manage" },
           { id: "add", label: "Add from GitHub", action: "begin" },
           { id: "remove", label: "Remove skills", action: "begin" },
           { id: "move", label: "Move skills", action: "begin" },
-          { id: "scan", label: "Scan custom directory", to: "inventory-path" },
+          { id: "scan", label: "Scan custom directory", action: "manage-scan" },
           { id: "help", label: "Help", to: "help" },
           { id: "close", label: "Close", close: true },
         ],
@@ -227,7 +257,7 @@ export function createSkillsMenu(
       preview: () => ({
         kind: "browse",
         title: "Selected skill contents",
-        items: browseItems(state, rpc, true),
+        items: previewItems(state, rpc),
         enableDetailSearch: true,
       }),
       destination: () => ({
@@ -310,13 +340,60 @@ export function createSkillsMenu(
         ].join("\n"),
         confirm: { id: "confirm", label: "Apply changes", action: "confirm" },
       }),
-      browse: () => ({
-        kind: "browse",
-        title: "Installed local skills",
+      manage: () => ({
+        kind: "choice",
+        title: "Manage installed skills",
         lines: ["Detected on disk, not a complete list of active Pi resources.", ...state.inventory.warnings],
-        items: browseItems(state, rpc),
-        enableDetailSearch: true,
+        items: state.inventory.skills.map((skill) => ({
+          id: skill.id,
+          label: `${safe(skill.name)} · ${safe(skill.location.label)}${rpc ? ` · ${safe(skill.path)}` : ""}`,
+          description: [skill.path, skill.readOnlyReason, ...skill.warnings].filter(Boolean).join(" — "),
+          searchText: `${skill.path} ${skill.description}`,
+        })),
+        action: "manage-skill",
+        initialItemId: state.managedId,
+        enableSearch: true,
+        viewportSize: 10,
       }),
+      "skill-actions": () => {
+        const skill = managedSkill();
+        const blocked = skill?.readOnlyReason ?? (!skill ? "Skill is no longer in the scanned inventory" : undefined);
+        return {
+          kind: "actions",
+          title: skill ? `${safe(skill.name)} · ${safe(skill.location.label)}` : "Skill unavailable",
+          lines: [
+            safe(skill?.path ?? ""),
+            ...(skill?.warnings.map(safe) ?? []),
+            ...(blocked ? [safe(blocked)] : []),
+            ...(state.copyMessage ? [state.copyMessage] : []),
+          ],
+          items: [
+            { id: "move-one", label: "Move…", action: "move-one", disabled: Boolean(blocked), disabledReason: blocked },
+            {
+              id: "remove-one",
+              label: "Remove…",
+              action: "remove-one",
+              busyLabel: "Preparing removal…",
+              disabled: Boolean(blocked),
+              disabledReason: blocked,
+            },
+            {
+              id: "copy-directory",
+              label: "Copy directory path",
+              action: "copy-directory",
+              busyLabel: "Copying directory path…",
+              description: "Copy the exact directory path, including characters hidden by the preview.",
+              disabled: mode !== "tui" || !skill,
+              disabledReason: !skill
+                ? "Choose an installed skill"
+                : mode !== "tui"
+                  ? "Clipboard copy requires Pi TUI"
+                  : undefined,
+            },
+            { id: "back", label: "Back", action: "back" },
+          ],
+        };
+      },
       help: () => ({ kind: "detail", title: "Skills help", lines: HELP }),
       "inventory-path": () => ({
         kind: "input",
@@ -332,6 +409,45 @@ export function createSkillsMenu(
       }),
     },
     actions: {
+      "manage-scan": () => {
+        owner.check();
+        state.afterScan = "manage";
+        return { kind: "to", screen: "inventory-path" };
+      },
+      "manage-skill": ({ itemId }) => {
+        owner.check();
+        if (!state.inventory.skills.some((skill) => skill.id === itemId))
+          throw new Error("Skill is no longer in the scanned inventory");
+        state.managedId = itemId;
+        state.copyMessage = undefined;
+        return { kind: "to", screen: "skill-actions" };
+      },
+      "move-one": () => {
+        selectManaged("move");
+        return { kind: "to", screen: "destination" };
+      },
+      "remove-one": ({ signal }) => {
+        selectManaged("remove");
+        return prepareRemoval(actionGuard(owner, signal));
+      },
+      "copy-directory": async ({ ctx, signal }) => {
+        const guard = actionGuard(owner, signal);
+        guard.check();
+        if (ctx.mode !== "tui" || !ctx.hasUI) throw new Error("Clipboard copy requires Pi TUI");
+        const skill = managedSkill();
+        if (!skill) throw new Error("Choose an installed skill");
+        state.copyMessage = undefined;
+        // Pi exposes no abort signal for clipboard writes. Drain accepted work;
+        // cancellation cannot undo a write and must not publish stale feedback.
+        await services.copyToClipboard(skill.directoryPath);
+        guard.check();
+        state.copyMessage = "Directory path sent to clipboard";
+        return { kind: "stay" };
+      },
+      back: () => {
+        owner.check();
+        return { kind: "back" };
+      },
       begin: ({ itemId }) => {
         if (itemId !== "add" && itemId !== "remove" && itemId !== "move") throw new Error("Unknown operation");
         owner.check();
@@ -368,11 +484,7 @@ export function createSkillsMenu(
         owner.check();
         if (state.selected.size === 0) throw new Error("Select at least one skill");
         if (state.mode !== "remove") return { kind: "to", screen: "destination" };
-        const guard = actionGuard(owner, signal);
-        const batch = await services.prepareOperation({ kind: "remove", skills: selectedLocals(state) }, guard);
-        guard.check();
-        state.batch = batch;
-        return { kind: "to", screen: "review" };
+        return prepareRemoval(actionGuard(owner, signal));
       },
       target: ({ itemId }) => {
         owner.check();
@@ -496,7 +608,7 @@ export async function showSkillsMenu(
     warnings: initial.value.locations.warnings.map(safe),
     registrationScope: "none",
     confirmed: false,
-    afterScan: route.kind === "main" ? "browse" : "select",
+    afterScan: route.kind === "main" ? "manage" : "select",
   };
   const start: Screen =
     route.kind === "main" ? "main" : route.kind === "add" && !route.repository ? "source" : "select";

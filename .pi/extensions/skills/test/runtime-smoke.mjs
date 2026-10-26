@@ -55,8 +55,9 @@ async function smoke(discovered) {
   const pending = new Map();
   const dialogs = [];
   const script = [
-    ["Remove skills", `[ ] sample · Project (Pi) · ${skill}`],
-    ["Remove skills", "Continue"],
+    ["Skills", "Manage installed skills"],
+    ["Manage installed skills", `sample · Project (Pi) · ${skill}`],
+    ["sample · Project (Pi)", "Remove…"],
     ["Confirm skill changes", "Apply changes"],
     ["Skill changes", "Reload now"],
     ["Skills", "Help"],
@@ -139,7 +140,7 @@ async function smoke(discovered) {
     ready = true;
     const commands = await request("get_commands");
     assert.equal(commands.commands.filter((command) => command.name === "skills").length, 1, stderr);
-    const removal = await request("prompt", { message: "/skills remove" });
+    const removal = await request("prompt", { message: "/skills" });
     assert.equal(removal.disposition, "handled");
     await assert.rejects(readFile(join(skill, "SKILL.md")), { code: "ENOENT" });
     const afterReload = await request("get_commands");

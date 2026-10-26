@@ -9,10 +9,10 @@ Completed on 2026-10-26:
 - Installed repository dependencies with `npm install`; the lockfile and manifests stayed unchanged.
 - Rebuilt the Kit workspace before consumer tests and checked its workspace resolution with `npm ls @narumitw/pi-tui-kit`.
 - Local NodeNext no-emit TypeScript and warning-free Biome checks passed.
-- Extension-local Vitest passed 294 tests across nine files, including command grammar, native validation branches, bounded GitHub transport, settings, tree operations, actual filesystem/UI integration, Kit TUI/RPC behavior, lifecycle races, and Pi's Jiti loader.
+- Extension-local Vitest passed 307 tests across nine files, including command grammar, native validation branches, bounded GitHub transport, settings, tree operations, actual filesystem/UI integration, Kit TUI/RPC behavior, lifecycle races, and Pi's Jiti loader.
 - Root `npm run check` passed builds, Biome, package boundaries, and workspace typechecks.
 - Root `npm test` passed 14,974 tests, with two existing skipped tests and no unhandled errors; the local suite runs separately.
-- `test/runtime-smoke.mjs` passed through the installed Pi CLI in RPC mode for both explicit loading and trusted-project auto-discovery. Each case exercised seven dialogs, actual removal, command-triggered reload, retained command registration, and unchanged message serialization across an ordinary Help/menu interaction. It used isolated home/agent/project directories and made no model requests.
+- `test/runtime-smoke.mjs` passed through the installed Pi CLI in RPC mode for both explicit loading and trusted-project auto-discovery. Each case exercised eight dialogs, per-skill actions, actual removal, command-triggered reload, retained command registration, and unchanged message serialization across an ordinary Help/menu interaction. It used isolated home/agent/project directories and made no model requests.
 - `test/headless-smoke.mjs` verified observable rejection in real print and JSON modes before skill mutation; JSON stdout remained valid protocol records. It used no credentials or model requests.
 - A read-only live GitHub smoke found 29 candidates in `narumiruna/skills` at commit `079415193cdacb7947dc0dde9526bda7dd659f43`. It downloaded and hash-verified `skills/default/write-plans`, including its applicable notice, as two files totaling 5,809 bytes. No skill was installed into a real user or project location.
 
@@ -36,6 +36,20 @@ Independent review identified three failure classes. The final implementation ad
 
 A final complete-diff audit includes the changes made after that independent review and the extension-local smoke scripts. It also covers native persistence completing before cancellation: regression tests verify the committed file and report registration as unconfirmed instead of falsely claiming rollback. A second independent read-only review found no remaining findings in the corrected source. Package packing is not applicable: no package metadata, published runtime, dependency floor, or publication behavior changed.
 
+## Per-skill action menu revision
+
+The approved interaction replaces the installed-skill read-only browse screen with Kit `choice` and `actions` screens. Selecting a path opens Move, Remove, Copy directory path, and Back; explicit batch previews and existing slash-command routes remain unchanged. Single-skill mutations share the existing preparation, confirmation, and filesystem engine.
+
+Applied MUST rules for this revision are verified as follows:
+
+- **Commands and modes — Test/Review:** retain batch routes, expose exact path identity in RPC, and disable clipboard copy outside TUI before calling the backend.
+- **UI — Test/Review:** use standard Kit screens, callback themes/keybindings and bounded frames; keep protected items informative without enabling mutations; sanitize displayed paths while retaining the raw copy payload.
+- **Lifecycle — Test/Review:** check ownership before and after the clipboard await, drain accepted native clipboard work on cancellation/disposal/replacement, and do not publish stale completion feedback.
+- **Mutation and settings — Test/Review:** reuse existing exact-path confirmation, native registration and queued operations; verify that a single-skill action does not carry a prior batch selection.
+- **Verification — Validator/Test/Smoke:** run the local typecheck, warning-free Biome, focused tests, full repository gates, Jiti loader tests, and isolated CLI RPC/headless smokes.
+
+Regression tests cover action navigation without raw-content pages, per-skill move/removal, confirmation cancellation, duplicate path identity, protected resources, raw directory copying, standalone Markdown parents, clipboard failure/retry, non-default keys, selected-row restoration, main-menu custom scanning after a prior batch, and clipboard cancellation/disposal/owner replacement. Native clipboard writes are mocked so tests do not modify the operator's clipboard. An independent read-only review of the revision found no remaining actionable findings.
+
 ## Deliberate limits
 
 Pi owns native settings publication through its public `SettingsManager`; this extension does not replace that implementation or claim extension-owned atomic settings storage. The native queue protects same-process file operations, not concurrent cross-process edits of the same array.
@@ -56,6 +70,6 @@ Run the documented interactive load command:
 pi --no-extensions -e ./.pi/extensions/skills/index.ts
 ```
 
-Verify checkbox selection/search, exact path review, non-default keys, IME positioning, bracketed paste, mouse interaction, fullscreen and regular mode, narrow resize, hard cancellation, trusted-project auto-discovery, and `/reload`. Expected result: standard Pi/Kit interaction, no unintended mutation, and refreshed skill discovery only after explicit reload.
+Verify per-skill action navigation and Back, native clipboard delivery, checkbox selection/search, exact path review, non-default keys, IME positioning, bracketed paste, mouse interaction, fullscreen and regular mode, narrow resize, hard cancellation, trusted-project auto-discovery, and `/reload`. Expected result: standard Pi/Kit interaction, no unintended mutation, and refreshed skill discovery only after explicit reload.
 
 These physical-terminal paths remain unverified because the agent must not launch an interactive TUI from Bash. The automated loader and RPC smokes are completed evidence, not a substitute for that terminal review. No package publication, visibility change, version tag, or release workflow is authorized by this handoff.

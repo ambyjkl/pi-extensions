@@ -256,6 +256,7 @@ export function createFilesystem(operations: Partial<typeof fs> = {}) {
           ...metadata,
           id: resolve(path),
           path: resolve(path),
+          directoryPath: markdown ? dirname(resolve(path)) : resolve(path),
           location,
           content,
           warnings: [...metadata.warnings, ...warnings, ...(metadata.disabledReason ? [metadata.disabledReason] : [])],

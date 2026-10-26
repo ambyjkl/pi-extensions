@@ -60,6 +60,7 @@ export interface LocalSkill {
   name: string;
   description: string;
   path: string;
+  directoryPath: string;
   location: Location;
   content: string;
   warnings: string[];

@@ -66,8 +66,9 @@ describe("real Pi Jiti resource loader", () => {
       const command = extension?.commands.get("skills");
       if (!command) throw new Error("Skills command did not load");
       const rpc = createRpcHarness([
-        { kind: "select", response: `[ ] sample · Project (Pi) · ${skill}` },
-        { kind: "select", response: "Continue" },
+        { kind: "select", response: "Manage installed skills" },
+        { kind: "select", response: `sample · Project (Pi) · ${skill}` },
+        { kind: "select", response: "Remove…" },
         { kind: "select", response: "Apply changes" },
         { kind: "select", response: "Close without reload" },
       ]);
@@ -81,7 +82,7 @@ describe("real Pi Jiti resource loader", () => {
         ui: { ...rpc.ui, notify },
         reload: vi.fn(),
       } as unknown as ExtensionCommandContext;
-      await command.handler("remove", ctx);
+      await command.handler("", ctx);
       rpc.assertConsumed();
       expect(notify).not.toHaveBeenCalled();
       await expect(readFile(join(skill, "SKILL.md"))).rejects.toMatchObject({ code: "ENOENT" });

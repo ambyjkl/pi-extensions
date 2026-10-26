@@ -29,6 +29,7 @@ const snapshot: RepositorySnapshot = {
 const local: LocalSkill = {
   id: "/workspace/.pi/skills/alpha",
   path: "/workspace/.pi/skills/alpha",
+  directoryPath: "/workspace/.pi/skills/alpha",
   name: "Alpha",
   description: "Alpha description",
   location: project,
@@ -64,6 +65,7 @@ function fixture() {
     })),
     previewRegistration: vi.fn(async () => undefined),
     applyRegistration: vi.fn(async () => {}),
+    copyToClipboard: vi.fn<Services["copyToClipboard"]>(async () => {}),
   };
   return { controller, guard, services, apply };
 }
@@ -119,9 +121,12 @@ describe("declarative skills workflow", () => {
       { kind: "input", response: "https://github.com/a/b" },
       select("Find skills"),
       select("Back"),
-      select("Back"),
+      select(undefined),
+      { kind: "input", response: undefined },
     ]);
-    await showSkillsMenu(context(rpc.ui, "rpc"), { kind: "add" }, env, f.guard, f.services);
+    const ctx = context(rpc.ui, "rpc");
+    await showSkillsMenu(ctx, { kind: "add" }, env, f.guard, f.services);
+    expect(ctx.ui.notify).not.toHaveBeenCalled();
     rpc.assertConsumed();
     expect(f.services.discoverRepository).toHaveBeenCalledWith("a/b", expect.any(AbortSignal));
     expect(f.apply).not.toHaveBeenCalled();
@@ -213,6 +218,283 @@ describe("declarative skills workflow", () => {
     expect(f.services.previewRegistration).toHaveBeenCalledWith("/custom/skills", "none", env, expect.any(Object));
     expect(f.services.applyRegistration).not.toHaveBeenCalled();
   });
+});
+
+describe("single-skill management actions", () => {
+  const label = `Alpha · Project (Pi) · ${local.path}`;
+  it("opens actions instead of a SKILL.md detail page and returns without mutation", async () => {
+    const f = fixture();
+    const rpc = createRpcHarness([
+      select("Manage installed skills"),
+      select(label),
+      select("Back"),
+      select("Back"),
+      select("Close"),
+    ]);
+    await showSkillsMenu(context(rpc.ui, "rpc"), { kind: "main" }, env, f.guard, f.services);
+    rpc.assertConsumed();
+    const actions = rpc.dialogs.find((dialog) => dialog.title.startsWith("Alpha · Project (Pi)"));
+    expect(actions?.options).toEqual([
+      "Move…",
+      "Remove…",
+      "[-] Copy directory path (unavailable: Clipboard copy requires Pi TUI)",
+      "Back",
+    ]);
+    expect(actions?.title).toContain(local.path);
+    expect(rpc.dialogs.some((dialog) => dialog.title.includes("Exact instructions"))).toBe(false);
+    expect(f.services.prepareOperation).not.toHaveBeenCalled();
+    expect(f.services.copyToClipboard).not.toHaveBeenCalled();
+    expect(f.apply).not.toHaveBeenCalled();
+  });
+  it("opens management after a main-menu custom scan even after returning from a batch", async () => {
+    const f = fixture();
+    const rpc = createRpcHarness([
+      select("Remove skills"),
+      select("Back"),
+      select("Scan custom directory"),
+      { kind: "input", response: "/custom/scan" },
+      select("Scan directory"),
+      select(label),
+      select("Back"),
+      select("Back"),
+      select(undefined),
+      { kind: "input", response: undefined },
+      select("Close"),
+    ]);
+    await showSkillsMenu(context(rpc.ui, "rpc"), { kind: "main" }, env, f.guard, f.services);
+    rpc.assertConsumed();
+    expect(rpc.dialogs.some((dialog) => dialog.title.startsWith("Manage installed skills"))).toBe(true);
+    expect(f.services.scanInventory).toHaveBeenCalledTimes(2);
+    expect(f.services.prepareOperation).not.toHaveBeenCalled();
+    expect(f.apply).not.toHaveBeenCalled();
+  });
+  it("removes only the chosen path through the existing final confirmation", async () => {
+    const f = fixture();
+    const second = {
+      ...local,
+      id: `${project.path}/second`,
+      path: `${project.path}/second`,
+      directoryPath: `${project.path}/second`,
+    };
+    f.services.scanInventory.mockResolvedValue({ skills: [local, second], warnings: [] });
+    const rpc = createRpcHarness([
+      select("Manage installed skills"),
+      select(`Alpha · Project (Pi) · ${second.path}`),
+      select("Remove…"),
+      select("Apply changes"),
+      select("Close without reload"),
+    ]);
+    await showSkillsMenu(context(rpc.ui, "rpc"), { kind: "main" }, env, f.guard, f.services);
+    rpc.assertConsumed();
+    expect(f.services.prepareOperation).toHaveBeenCalledWith({ kind: "remove", skills: [second] }, expect.any(Object));
+    expect(f.apply).toHaveBeenCalledTimes(1);
+  });
+  it("moves one chosen skill without carrying a previous batch selection", async () => {
+    const f = fixture();
+    const second = {
+      ...local,
+      id: `${project.path}/beta`,
+      path: `${project.path}/beta`,
+      directoryPath: `${project.path}/beta`,
+      name: "Beta",
+    };
+    f.services.scanInventory.mockResolvedValue({ skills: [local, second], warnings: [] });
+    const rpc = createRpcHarness([
+      select("Remove skills"),
+      select("[ ] Alpha · Project (Pi)"),
+      select("Back"),
+      select("Manage installed skills"),
+      select(`Beta · Project (Pi) · ${second.path}`),
+      select("Move…"),
+      select("User (Pi)"),
+      select("Prepare review"),
+      select("Apply changes"),
+      select("Close without reload"),
+    ]);
+    await showSkillsMenu(context(rpc.ui, "rpc"), { kind: "main" }, env, f.guard, f.services);
+    rpc.assertConsumed();
+    expect(f.services.prepareOperation).toHaveBeenCalledWith(
+      { kind: "move", target: user, skills: [second] },
+      expect.any(Object),
+    );
+    expect(f.apply).toHaveBeenCalledTimes(1);
+  });
+  it("cancels single-skill removal at the review without applying it", async () => {
+    const f = fixture();
+    const rpc = createRpcHarness([
+      select("Manage installed skills"),
+      select(label),
+      select("Remove…"),
+      select("Back"),
+      select("Back"),
+      select("Back"),
+      select("Close"),
+    ]);
+    await showSkillsMenu(context(rpc.ui, "rpc"), { kind: "main" }, env, f.guard, f.services);
+    rpc.assertConsumed();
+    expect(f.services.prepareOperation).toHaveBeenCalledTimes(1);
+    expect(f.apply).not.toHaveBeenCalled();
+  });
+  it("keeps protected skills selectable but disables mutations and never copies from RPC", async () => {
+    const f = fixture();
+    const readOnlyReason = "Linked skill is read-only";
+    f.services.scanInventory.mockResolvedValue({ skills: [{ ...local, readOnlyReason }], warnings: [] });
+    const rpc = createRpcHarness([
+      select("Manage installed skills"),
+      select(label),
+      select(`[-] Move… (unavailable: ${readOnlyReason})`),
+      select(`[-] Remove… (unavailable: ${readOnlyReason})`),
+      select("[-] Copy directory path (unavailable: Clipboard copy requires Pi TUI)"),
+      select("Back"),
+      select("Back"),
+      select("Close"),
+    ]);
+    await showSkillsMenu(context(rpc.ui, "rpc"), { kind: "main" }, env, f.guard, f.services);
+    rpc.assertConsumed();
+    expect(f.services.prepareOperation).not.toHaveBeenCalled();
+    expect(f.services.copyToClipboard).not.toHaveBeenCalled();
+  });
+
+  async function openActions(tui: ReturnType<typeof createTuiHarness>) {
+    await waitTitle(tui, "Skills");
+    tui.press("tui.select.confirm");
+    await waitTitle(tui, "Manage installed skills");
+    tui.press("tui.select.confirm");
+    await waitTitle(tui, "Alpha · Project (Pi)");
+  }
+  function activateCopy(tui: ReturnType<typeof createTuiHarness>) {
+    tui.press("tui.select.down");
+    tui.press("tui.select.down");
+    tui.press("tui.select.confirm");
+  }
+  it("copies the exact raw directory path, not display text or SKILL.md contents", async () => {
+    const f = fixture();
+    const raw = "/workspace/.pi/skills/alpha\u001b[31m\nraw";
+    f.services.scanInventory.mockResolvedValue({ skills: [{ ...local, path: raw, directoryPath: raw }], warnings: [] });
+    const tui = createTuiHarness();
+    const ctx = context({ custom: tui.custom }, "tui");
+    const work = showSkillsMenu(ctx, { kind: "main" }, env, f.guard, f.services);
+    await openActions(tui);
+    activateCopy(tui);
+    await vi.waitFor(() => expect(f.services.copyToClipboard).toHaveBeenCalledWith(raw));
+    await waitTitle(tui, "Directory path sent to clipboard");
+    expect(tui.render().join("\n")).not.toContain("\u001b[31m");
+    tui.press("ctrl+c");
+    await work;
+    expect(f.apply).not.toHaveBeenCalled();
+  });
+  it("copies the enclosing directory for a read-only standalone Markdown skill", async () => {
+    const f = fixture();
+    f.services.scanInventory.mockResolvedValue({
+      skills: [
+        {
+          ...local,
+          path: `${project.path}/standalone.md`,
+          directoryPath: project.path,
+          readOnlyReason: "Standalone Markdown skills are read-only",
+        },
+      ],
+      warnings: [],
+    });
+    const tui = createTuiHarness();
+    const work = showSkillsMenu(context({ custom: tui.custom }, "tui"), { kind: "main" }, env, f.guard, f.services);
+    await openActions(tui);
+    activateCopy(tui);
+    await waitTitle(tui, "Directory path sent to clipboard");
+    expect(f.services.copyToClipboard).toHaveBeenCalledWith(project.path);
+    tui.press("ctrl+c");
+    await work;
+  });
+  it("keeps clipboard failures retryable without executing a file mutation", async () => {
+    const f = fixture();
+    f.services.copyToClipboard.mockRejectedValueOnce(new Error("Clipboard unavailable\u001b[31m"));
+    const tui = createTuiHarness();
+    const ctx = context({ custom: tui.custom }, "tui");
+    const work = showSkillsMenu(ctx, { kind: "main" }, env, f.guard, f.services);
+    await openActions(tui);
+    activateCopy(tui);
+    await vi.waitFor(() => expect(ctx.ui.notify).toHaveBeenCalledWith("Clipboard unavailable", "error"));
+    await waitTitle(tui, "Alpha · Project (Pi)");
+    tui.press("tui.select.confirm");
+    await waitTitle(tui, "Directory path sent to clipboard");
+    expect(f.services.copyToClipboard).toHaveBeenCalledTimes(2);
+    tui.press("ctrl+c");
+    await work;
+    expect(f.apply).not.toHaveBeenCalled();
+  });
+  it("returns to the previously selected skill using non-default navigation keys", async () => {
+    const f = fixture();
+    const second = {
+      ...local,
+      id: `${project.path}/beta`,
+      path: `${project.path}/beta`,
+      directoryPath: `${project.path}/beta`,
+      name: "Beta",
+    };
+    f.services.scanInventory.mockResolvedValue({ skills: [local, second], warnings: [] });
+    const keys = new KeybindingsManager(TUI_KEYBINDINGS, {
+      "tui.select.confirm": "ctrl+y",
+      "tui.select.cancel": "ctrl+g",
+      "tui.select.down": "ctrl+n",
+    });
+    const tui = createTuiHarness({ keybindings: keys });
+    const work = showSkillsMenu(context({ custom: tui.custom }, "tui"), { kind: "main" }, env, f.guard, f.services);
+    await waitTitle(tui, "Skills");
+    tui.send("\x19");
+    await waitTitle(tui, "Manage installed skills");
+    tui.send("\x0e");
+    tui.send("\x19");
+    await waitTitle(tui, "Beta · Project (Pi)");
+    tui.send("\x07");
+    await waitTitle(tui, "Manage installed skills");
+    const frame = tui.render().join("\n");
+    expect(frame).toMatch(/→.*Beta/);
+    tui.press("ctrl+c");
+    await work;
+  });
+  it.each(["cancel", "dispose", "owner-abort"] as const)(
+    "drains accepted clipboard work on %s and does not publish stale feedback",
+    async (action) => {
+      const f = fixture();
+      let finish!: () => void;
+      f.services.copyToClipboard.mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const tui = createTuiHarness();
+      const ctx = context({ custom: tui.custom }, "tui");
+      let settled = false;
+      const work = showSkillsMenu(ctx, { kind: "main" }, env, f.guard, f.services).then(
+        (value) => {
+          settled = true;
+          return value;
+        },
+        (error) => {
+          settled = true;
+          if (action !== "owner-abort") throw error;
+          return false;
+        },
+      );
+      await openActions(tui);
+      activateCopy(tui);
+      await vi.waitFor(() => expect(f.services.copyToClipboard).toHaveBeenCalledTimes(1));
+      if (action === "cancel") tui.press("ctrl+c");
+      else if (action === "dispose") tui.dispose();
+      else f.controller.abort();
+      expect(settled).toBe(false);
+      finish();
+      if (action === "cancel") {
+        await waitTitle(tui, "Alpha · Project (Pi)");
+        expect(tui.render().join("\n")).not.toContain("Directory path sent to clipboard");
+        tui.press("ctrl+c");
+      }
+      await work;
+      expect(f.apply).not.toHaveBeenCalled();
+      expect(ctx.ui.notify).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("Kit TUI rendering and interaction ownership", () => {
