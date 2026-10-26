@@ -111,6 +111,7 @@ Custom and proxy origins fail before network access, redirects are rejected, and
 Count-based plan buckets remain integer request counts and are rendered with their source-defined windows.
 Live responses omit both `used` and `remaining` on untouched rows and may report only `remaining` once usage starts, so a row with a positive `limit` and no counters means zero usage, and when only one counter is present the other is derived from `limit`.
 A monthly-plan response reported in [issue #1390](https://github.com/narumiruna/pi-extensions/issues/1390) supplies `usages.limit_month_total.used_ratio` without a count-based monthly row; the extension shows its remaining percentage and `reset_time` as a monthly bucket without inventing a fixed month duration.
+Monthly ratio support is verified with sanitized fixtures, not an authenticated live-account check. A maintainer with an eligible Kimi account can compare `/usage` and the statusline with the account's monthly quota; live response and wallet behavior remain unverified by these fixtures.
 The same map can supply `limit_5h` and `limit_week` when those windows are not present in `limits` or `usage`; `limit_month_code` is not a second total quota.
 Explicit count-based windows with identifiable durations take precedence, including duplicate or malformed count rows, so ratio rows cannot mask their unavailable state.
 Ratios must be finite numbers between zero and one; unknown map keys, malformed rows, invalid timestamps, and unknown count-based units do not receive guessed semantics.
