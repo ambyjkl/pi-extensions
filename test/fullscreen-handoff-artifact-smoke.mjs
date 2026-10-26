@@ -150,7 +150,7 @@ await writeFile(
         strict: true,
         module: "NodeNext",
         moduleResolution: "NodeNext",
-        target: "ES2022",
+        target: "ES2024",
         noEmit: true,
         types: ["node"],
         skipLibCheck: true,
