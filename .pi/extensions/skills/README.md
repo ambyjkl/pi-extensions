@@ -1,6 +1,6 @@
 # pi-skills
 
-Manage local skill bundles from `/skills`. This project-local extension uses Pi TUI Kit for menus, selection, previews, tasks, and TUI/RPC adaptation. Pi still owns skill discovery, project trust, filtering, and name-collision precedence.
+Manage local skill bundles and model invocation from `/skills`. This project-local extension uses Pi TUI Kit for menus, settings, selection, previews, tasks, and TUI/RPC adaptation. Pi still owns skill discovery, project trust, filtering, and name-collision precedence.
 
 ## Setup
 
@@ -21,7 +21,7 @@ This is not a separately published package. It needs the repository's installed 
 
 ## Commands
 
-1. `/skills` opens Manage installed skills, Add from GitHub, Remove skills, Move skills, Scan custom directory, Help, and Close.
+1. `/skills` opens Manage installed skills, Configure model invocation, Add from GitHub, Remove skills, Move skills, Scan custom directory, Help, and Close.
 2. `/skills add` asks for a public GitHub repository.
 3. `/skills add narumiruna/skills` discovers repository skills directly.
 4. `/skills remove` selects exact local paths for permanent removal.
@@ -30,6 +30,27 @@ This is not a separately published package. It needs the repository's installed 
 An add source accepts `owner/repo` or an exact `https://github.com/owner/repo` URL. Ref suffixes, `.git` URLs, extra URL segments, credentials, unknown routes, and trailing arguments are rejected. Remove and move do not accept a name argument because names can occur at several paths.
 
 These commands require Pi TUI or an RPC client with extension dialogs. Print and JSON modes reject them before network or mutation work. RPC uses Kit's dialog fallback, including full identifying paths in selection labels; it does not display custom terminal components.
+
+## Model invocation
+
+Open `/skills` → Configure model invocation, select a skill, inspect Source file and Writes target in the scrollable review, choose Open invocation setting, then change Model invocation:
+
+1. `automatic`: remove the native `disable-model-invocation` field and use Pi's default model discovery.
+2. `manual only`: write `disable-model-invocation: true` to hide the skill from Pi's advertised catalog. Explicit `/skill:name` commands still work. This setting is not an access-control boundary: a model that already knows the file path can still read it.
+
+This list comes from `ctx.getSystemPromptOptions().skills`, not the disk inventory. It includes currently loaded manual-only, package, ancestor, and standalone Markdown skills. Pi keeps its discovery, filtering, and collision precedence. Newly installed or externally registered skills appear only after reload.
+
+Rows show the skill name, invocation mode, and scope without repeating the skill's model-facing instructions. Selected-item details show the complete source path, source, and active mode. Full descriptions remain searchable. RPC labels include mode and complete identifying paths because RPC choices do not display secondary descriptions.
+
+Active describes Pi's current loaded catalog. Saved appears after inspecting the source file or completing a save. If the saved mode differs from the active mode, the row shows Reload pending and the main menu offers Reload now, including for differences already present on disk. Returning to the active value clears the row marker; reload remains available after a completed write. These UI values never modify native loaded skill objects.
+
+Changes save immediately to the selected source file; Escape does not undo a save. The scrollable review exposes the complete canonical write target, including long paths, before enabling a change; it remains accessible on constrained terminals. Unlike bundle Move and Remove, invocation settings intentionally allow edits through loaded symlinks and to package-provided files. User/shared edits can affect other projects or agents that read the same file. Package updates can overwrite edits. Files that are hard-linked, non-regular, invalid UTF-8, or larger than 64 MiB are not editable. Malformed frontmatter, non-simple owned booleans, unsupported key layouts, and changed files or targets block saves rather than being normalized or overwritten.
+
+Only the native top-level field is changed. Other frontmatter, body bytes, BOM, newline style, POSIX mode, owner, and group are preserved. A save fails if ownership or mode cannot be preserved. Atomic replacement does not copy extended ACLs or other extended attributes; edit files that depend on those attributes manually. Pi validates the candidate before an atomic temporary-file-plus-rename publication. Complete transactions share the bundle tree queue and Pi's canonical file mutation queue. A failed pre-publication save leaves the original file and displayed value unchanged; select the skill again after a stale-file error. Other Pi processes and arbitrary external edits are not locked.
+
+After a save, the manager refreshes its disk inventory so later bundle actions do not use stale fingerprints. If that refresh fails, the saved setting remains saved and the stale inventory is cleared; reopen `/skills` before managing bundles. Return to the main menu and choose Reload now to refresh Pi's catalog, or Close without reload to keep the current resource snapshot. No prompt, message, or active tool changes occur merely from opening the settings or saving a file. Reload is the explicit catalog transition and does not erase instructions already in the conversation.
+
+There is no new JSON settings file, project override layer, command alias, or dependency on the user-level `skill-settings` extension. Existing frontmatter settings need no migration. The predecessor remains available; it is not removed or disabled. This new entrypoint is project-local and loads only after project trust.
 
 ## Add
 
@@ -79,7 +100,7 @@ Move confirms each source-to-destination mapping. Safe same-filesystem moves use
 
 Existing destinations are skipped. There is no overwrite, merge, force, or rename feature. Equal or overlapping source/destination trees are rejected. Stale files, replaced containers, path escapes, and unsupported copy entries are rejected.
 
-Symlinked roots and linked skills, standalone Markdown skills, ancestor roots, and package caches are read-only. Linked aliases can be inspected, but their targets are never mutation targets. A bundle containing symlinks or hard-linked files cannot be moved; removal never follows a linked target. Native glob/filter entries and file resources are not treated as writable container roots.
+For bundle Move and Remove, symlinked roots and linked skills, standalone Markdown skills, ancestor roots, and package caches are read-only. Linked aliases can be inspected, but bundle operations never mutate their targets. Model invocation is a separate source-file setting with the explicit target review described above. A bundle containing symlinks or hard-linked files cannot be moved; removal never follows a linked target. Native glob/filter entries and file resources are not treated as writable container roots.
 
 ## Safety and cancellation
 
@@ -87,7 +108,7 @@ Review unfamiliar skills and their supporting programs before installation. Skil
 
 Fixed limits bound requests, response bodies, candidates, files, bytes, recursion, and parallel work. The limits are internal constants, not settings. GitHub operations have a deadline; local inventory and mutation snapshots are bounded. Validation data and publication staging are cleaned up on normal completion and failure. Staging stays outside discovered skill roots.
 
-Before final confirmation, cancellation changes no installed skills or settings. After application starts, cancellation stops subsequent items after the current safe filesystem step. Completed items remain completed. A partially failed recursive deletion drains missing-entry recovery even after cancellation or session invalidation, using captured filesystem authorization rather than the old Pi context. Recovery rechecks path and root identity and never overwrites existing data. If recovery I/O also fails, the result identifies incomplete recovery and any verified destination; inspect those paths before retrying.
+For bundle operations, cancellation before final confirmation changes no installed bundles or native resource registrations. Invocation settings save immediately and are not rolled back by cancellation. After batch application starts, cancellation stops subsequent items after the current safe filesystem step. Completed items remain completed. A partially failed recursive deletion drains missing-entry recovery even after cancellation or session invalidation, using captured filesystem authorization rather than the old Pi context. Recovery rechecks path and root identity and never overwrites existing data. If recovery I/O also fails, the result identifies incomplete recovery and any verified destination; inspect those paths before retrying.
 
 The extension owns one flow per session manager. It aborts and drains owned work on disposal, session replacement, reload, and shutdown. Overlapping tree operations and native file changes are serialized within this process. Separate Pi processes and arbitrary external filesystem edits are not locked; concurrent cross-process mutation is unsupported. Snapshot checks detect changes at defined boundaries, not every possible adversarial race.
 
@@ -113,4 +134,4 @@ See [verification and terminal handoff](./verification.md) for completed evidenc
 
 ## Files
 
-`index.ts` forwards registration to `skills-extension.ts`. `command.ts` owns argument grammar. `menu.ts` owns Kit screens and operation drafts. `github.ts` owns remote snapshots and bounded downloads. `metadata.ts` delegates validation to Pi. `locations.ts` owns targets and native path registration. `filesystem.ts` owns inventory, snapshots, and safe per-skill operations. `types.ts` defines contracts; `invariant.ts` checks required operation data. Tests, isolated runtime smokes, and their local configuration stay inside this directory.
+`index.ts` forwards registration to `skills-extension.ts`. `command.ts` owns argument grammar. `menu.ts` owns Kit screens and operation drafts. `github.ts` owns remote snapshots and bounded downloads. `metadata.ts` delegates validation to Pi. `locations.ts` owns targets and native path registration. `filesystem.ts` owns inventory, snapshots, and safe per-skill bundle operations. `invocation.ts` owns loaded-skill settings snapshots and atomic saves; `frontmatter.ts` changes only the native invocation field. `mutation-queue.ts` serializes tree operations and metadata edits. `types.ts` defines contracts; `invariant.ts` checks required operation data. Tests, isolated runtime smokes, and their local configuration stay inside this directory.

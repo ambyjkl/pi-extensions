@@ -94,6 +94,65 @@ describe("real Pi Jiti resource loader", () => {
       expect(loader.getSkills().skills.some((item) => item.name === "sample")).toBe(false);
     },
   );
+  it.each([false, true])(
+    "configures a loaded linked skill through Jiti without changing the catalog before reload (auto-discovery=%s)",
+    async (discovered) => {
+      const target = join(root, "source", "sample");
+      const linked = join(agentDir, "skills", "sample");
+      await seed(target);
+      await mkdir(dirname(linked), { recursive: true });
+      await symlink(target, linked, "dir");
+      const original = await readFile(join(target, "SKILL.md"), "utf8");
+      const { loader } = await resources(discovered);
+      const native = loader.getSkills().skills;
+      const before = JSON.stringify(native);
+      const { formatSkillsForPrompt } = await import("@earendil-works/pi-coding-agent");
+      const promptBefore = formatSkillsForPrompt(native);
+      const command = loader
+        .getExtensions()
+        .extensions.find((item) => item.commands.has("skills"))
+        ?.commands.get("skills");
+      if (!command) throw new Error("Skills command did not load");
+      const rpc = createRpcHarness([
+        { kind: "select", response: "Configure model invocation" },
+        { kind: "select", response: `sample · Automatic · user · ${join(linked, "SKILL.md")}` },
+        { kind: "select", response: "Open invocation setting" },
+        { kind: "select", response: "Model invocation (automatic)" },
+        { kind: "select", response: "Back" },
+        { kind: "select", response: "Back" },
+        { kind: "select", response: "Back" },
+        { kind: "select", response: "Close without reload" },
+      ]);
+      const notify = vi.fn();
+      const ctx = {
+        cwd,
+        mode: "rpc",
+        hasUI: true,
+        sessionManager: {},
+        isProjectTrusted: () => true,
+        getSystemPromptOptions: () => ({ skills: native }),
+        ui: { ...rpc.ui, notify },
+        reload: vi.fn(),
+      } as unknown as ExtensionCommandContext;
+      await command.handler("", ctx);
+      rpc.assertConsumed();
+      expect(notify).not.toHaveBeenCalled();
+      expect(rpc.dialogs.some((dialog) => dialog.title.includes(`Writes target: ${join(target, "SKILL.md")}`))).toBe(
+        true,
+      );
+      expect(await readFile(join(target, "SKILL.md"), "utf8")).toBe(
+        original.replace("---\nInstructions", "disable-model-invocation: true\n---\nInstructions"),
+      );
+      expect(JSON.stringify(loader.getSkills().skills)).toBe(before);
+      expect(formatSkillsForPrompt(loader.getSkills().skills)).toBe(promptBefore);
+      expect(ctx.reload).not.toHaveBeenCalled();
+      await loader.reload();
+      const reloaded = loader.getSkills().skills;
+      expect(reloaded.find((skill) => skill.name === "sample")?.disableModelInvocation).toBe(true);
+      expect(formatSkillsForPrompt(reloaded)).not.toContain("<name>sample</name>");
+      expect(reloaded.some((skill) => skill.name === "sample")).toBe(true);
+    },
+  );
   it("does not auto-discover this project extension without project trust", async () => {
     const { loader } = await resources(true, false);
     expect(loader.getExtensions().extensions.some((item) => item.commands.has("skills"))).toBe(false);

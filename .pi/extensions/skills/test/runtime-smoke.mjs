@@ -15,6 +15,13 @@ async function smoke(discovered) {
   const skill = join(cwd, ".pi", "skills", "sample");
   await mkdir(skill, { recursive: true });
   await mkdir(agent);
+  const linked = join(agent, "skills", "linked");
+  const target = join(root, "source", "linked");
+  const linkedContent = "---\nname: linked\ndescription: Linked RPC smoke skill\n---\nLinked instructions\n";
+  await mkdir(target, { recursive: true });
+  await mkdir(dirname(linked), { recursive: true });
+  await writeFile(join(target, "SKILL.md"), linkedContent);
+  await symlink(target, linked, "dir");
   await writeFile(
     join(skill, "SKILL.md"),
     "---\nname: sample\ndescription: Isolated RPC smoke skill\n---\nInstructions\n",
@@ -54,7 +61,22 @@ async function smoke(discovered) {
   let failure;
   const pending = new Map();
   const dialogs = [];
+  const invocation = (value) => [
+    ["Skills", "Configure model invocation"],
+    [
+      "Configure model invocation",
+      `linked · ${value === "automatic" ? "Automatic" : "Manual only"} · user · ${join(linked, "SKILL.md")}`,
+    ],
+    ["Review invocation target", "Open invocation setting"],
+    ["Model invocation", `Model invocation (${value})`],
+    ["Model invocation", "Back"],
+    ["Review invocation target", "Back"],
+    ["Configure model invocation", "Back"],
+    ["Skills", "Reload now"],
+  ];
   const script = [
+    ...invocation("automatic"),
+    ...invocation("manual only"),
     ["Skills", "Manage installed skills"],
     ["Manage installed skills", `sample · Project (Pi) · ${skill}`],
     ["sample · Project (Pi)", "Remove…"],
@@ -101,6 +123,11 @@ async function smoke(discovered) {
           const [title, value] = script.shift() ?? [];
           assert.ok(title && message.title.startsWith(title), `Unexpected RPC dialog: ${message.title}`);
           assert.ok(message.options.includes(value), `Missing RPC option ${value}: ${message.options}`);
+          if (title === "Model invocation" || title === "Review invocation target")
+            assert.ok(
+              message.title.includes(`Writes target: ${join(target, "SKILL.md")}`),
+              "Canonical write target must be visible before toggling",
+            );
           dialogs.push({ title, value });
           child.stdin.write(`${JSON.stringify({ type: "extension_ui_response", id: message.id, value })}\n`);
         } else if (
@@ -140,6 +167,12 @@ async function smoke(discovered) {
     ready = true;
     const commands = await request("get_commands");
     assert.equal(commands.commands.filter((command) => command.name === "skills").length, 1, stderr);
+    assert.equal((await request("prompt", { message: "/skills" })).disposition, "handled");
+    assert.match(await readFile(join(target, "SKILL.md"), "utf8"), /disable-model-invocation: true/);
+    const manualCommands = await request("get_commands");
+    assert.ok(manualCommands.commands.some((command) => command.name === "skill:linked"));
+    assert.equal((await request("prompt", { message: "/skills" })).disposition, "handled");
+    assert.equal(await readFile(join(target, "SKILL.md"), "utf8"), linkedContent);
     const removal = await request("prompt", { message: "/skills" });
     assert.equal(removal.disposition, "handled");
     await assert.rejects(readFile(join(skill, "SKILL.md")), { code: "ENOENT" });
@@ -162,6 +195,7 @@ async function smoke(discovered) {
       discovery: discovered ? "trusted-project" : "explicit-entrypoint",
       dialogs: dialogs.length,
       reload: "passed",
+      invocation: "linked target round trip and manual skill retained after reload",
       prefix: "unchanged across ordinary menu",
     };
   } finally {
