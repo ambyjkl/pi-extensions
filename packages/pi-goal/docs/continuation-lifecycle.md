@@ -1,10 +1,14 @@
 # pi-goal interruption and continuation lifecycle
 
+[Back to README](../README.md)
+
 This note records the current lifecycle contract behind `@narumitw/pi-goal`. It explains the
 extension's settled-boundary dispatcher, retry and compaction ownership, and the remaining races in
 that idle-dispatch design. It does not describe every continuation API available in Pi.
 
 ## Scope and authority
+
+Source and test paths below are relative to the repository root. Tests are not included in the published package.
 
 The maintained implementation and tests are authoritative:
 

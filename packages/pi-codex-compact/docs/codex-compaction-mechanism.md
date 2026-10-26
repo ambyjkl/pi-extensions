@@ -1,5 +1,7 @@
 # Historical research: Codex compaction mechanism
 
+[Back to README](../README.md)
+
 Research snapshot: 2026-08-03.
 
 Status: Historical and intentionally pinned to one Codex revision.
@@ -26,7 +28,7 @@ The main implementation surfaces were:
 
 This is an internal historical implementation note, not a current-version guide or a claim about every Codex release or the hosted backend's undocumented internals.
 Later Codex revisions added material changes, including provider-capability selection with Amazon Bedrock Remote V2 support, richer retained-content metadata, and revised image budgeting.
-All external Codex source paths, line numbers, provider claims, limits, and lifecycle details below apply only to the pinned commit; the final Pi extension section is maintained separately.
+All external Codex source paths, line numbers, provider claims, limits, and lifecycle details below apply only to the pinned commit, except for the separately dated historical addendum. Use the [implementation reference](./implementation.md) for current Pi extension behavior.
 
 ## Executive summary
 
@@ -811,43 +813,9 @@ cancellation options. Deterministic adapter tests verified that the built-in Cod
 Responses adapters each exposed one HTTP Responses request and accepted a compaction-only or synthetic
 completed SSE response. These tests verified adapter plumbing, not hosted protocol support or entitlement.
 
-## Current Pi extension boundary
+## Pi extension reference
 
-The external Codex research above remains pinned. The package-owned
-[implementation reference](../../packages/pi-codex-compact/docs/implementation.md) maintains the
-current protocol, replay, ownership, recovery, and continuation contract. The
-[README](../../packages/pi-codex-compact/README.md) owns installation, settings, compatibility, and safety guidance.
-
-The extension supports the built-in Codex, OpenAI, and Azure Responses APIs and explicitly configured
-custom API profiles. Default `auto` routing selects Remote V2 for the Codex profile and unary
-Responses Compact for the OpenAI profile. Context Management is a separate experimental, explicit
-opt-in streaming protocol; it can consume quota even when no checkpoint is returned.
-
-The extension writes version 3 checkpoint details and reads version 1 and 2 details without rewriting
-old sessions. Replay validates the persisted summary identity and retained-history fingerprints before
-replacing a deterministic marker in the provider payload. The
-[checkpoint implementation](../../packages/pi-codex-compact/src/checkpoint.ts) defines the stored schema and bounds.
-
-Opaque replay requires the issuing provider ID, real API label, resolved profile, and current
-authorization of any custom API profile. The recorded model ID identifies the checkpoint creator;
-changing models within the same provider and compatible route does not locally disable replay.
-The backend still determines whether it accepts that opaque state.
-
-A provider change does not send the issuer's encrypted checkpoint to the target provider. With a
-compatible API/profile and summary recovery enabled, the extension asks the original issuer to
-produce a bounded plaintext summary and persists it for branch-local reuse. This adds an inference
-request and is lossy, not local decryption. Missing issuer access, disabled recovery, invalid output,
-or stale ownership stops the transfer without replacing the checkpoint. See
-[Provider changes](../../packages/pi-codex-compact/docs/implementation.md#provider-changes).
-
-The package retains Pi's threshold, `/compact`, overflow retry, append-only session tree, and
-`CompactionEntry` publication. Unsupported APIs remain Pi-native. Remote failure before the first
-checkpoint can use native fallback; an existing checkpoint requires checkpoint-aware recovery or
-cancellation, with documented lossy native fallback after recovery failure. See
-[Recovery and native fallback](../../packages/pi-codex-compact/docs/implementation.md#recovery-and-native-fallback).
-
-This is payload replay, not full Codex-core parity. The extension does not reproduce Codex's context
-window generations, summary-free token-budget reset, exact pre-turn and mid-turn continuation state,
-pending-input boundary, provider `comp_hash` compatibility checks, request lineage headers, or
-prompt-cache window identity. Pi's public `getAllTools()` metadata also omits the optional
-`constrainedSampling` field, so Remote V2 preserves exposed tool order and schema fields but not that field.
+The [implementation reference](./implementation.md) owns the current protocol, checkpoint schema,
+replay, provider transfer, recovery, continuation, and Pi/Codex ownership boundary. The
+[README](../README.md) owns installation, settings access, compatibility, and safety guidance.
+This historical research does not define the current extension contract.
