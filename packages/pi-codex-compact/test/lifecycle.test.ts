@@ -192,8 +192,9 @@ function event(
 
 function sseResponse() {
   const item = { type: "compaction", encrypted_content: "opaque" };
+  const completedItem = { encrypted_content: "opaque", type: "compaction" };
   return new Response(
-    `data: ${JSON.stringify({ type: "response.output_item.done", item })}\n\ndata: ${JSON.stringify({ type: "response.completed", response: { output: [item] } })}\n\n`,
+    `data: ${JSON.stringify({ type: "response.output_item.done", item })}\n\ndata: ${JSON.stringify({ type: "response.completed", response: { output: [completedItem] } })}\n\n`,
   );
 }
 
@@ -424,7 +425,7 @@ test("generic OpenAI Responses compacts through the unary endpoint", async () =>
   assert.equal(statuses.get("codex-compact"), undefined);
 });
 
-test("manual, threshold, and overflow compaction preserve Pi preparation boundaries", async () => {
+test("manual, threshold, and overflow compaction publish reordered items at Pi preparation boundaries", async () => {
   for (const [reason, willRetry] of [
     ["manual", false],
     ["threshold", false],
@@ -436,7 +437,7 @@ test("manual, threshold, and overflow compaction preserve Pi preparation boundar
       fetch: async () => sseResponse(),
     })(mock.pi);
     const handler = mock.events.get("session_before_compact")?.[0];
-    const { ctx } = createMockContext({
+    const { ctx, notifications } = createMockContext({
       model,
       getSystemPrompt: () => "system",
       sessionManager: { getSessionId: () => "session", getBranch: () => branch() },
@@ -453,10 +454,15 @@ test("manual, threshold, and overflow compaction preserve Pi preparation boundar
       ];
     }
     const result = (await handler?.(compactEvent, ctx)) as {
-      compaction: { firstKeptEntryId: string; tokensBefore: number };
+      compaction: { firstKeptEntryId: string; tokensBefore: number; details: unknown };
     };
     assert.equal(result.compaction.firstKeptEntryId, compactEvent.preparation.firstKeptEntryId);
     assert.equal(result.compaction.tokensBefore, compactEvent.preparation.tokensBefore);
+    const details = parseCheckpointDetails(result.compaction.details);
+    assert.ok(details);
+    assert.equal(details.protocol, "remote-v2");
+    assert.deepEqual(details.replacementHistory.at(-1), { encrypted_content: "opaque", type: "compaction" });
+    assert.deepEqual(notifications, []);
   }
 });
 
