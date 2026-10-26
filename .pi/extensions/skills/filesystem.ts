@@ -5,6 +5,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { required } from "./invariant.ts";
 import { inspectBundleMetadata, inspectMetadata } from "./metadata.ts";
+import { withSkillTreeQueue as serialized } from "./mutation-queue.ts";
 import type {
   Guard,
   Inventory,
@@ -15,15 +16,6 @@ import type {
   PreparedBatch,
   SkillBundle,
 } from "./types.ts";
-
-// The tree queue is deliberately broader than Pi's exact-file queue. Neither
-// queue coordinates other processes; concurrent external tree edits are unsupported.
-let tail: Promise<unknown> = Promise.resolve();
-function serialized<T>(work: () => Promise<T>): Promise<T> {
-  const result = tail.then(work);
-  tail = result.catch(() => undefined);
-  return result;
-}
 
 function mutationQueues<T>(paths: string[], work: () => Promise<T>): Promise<T> {
   const ordered = [...new Set(paths.map((path) => resolve(path)))].sort();

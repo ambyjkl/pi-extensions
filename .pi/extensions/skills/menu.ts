@@ -1,9 +1,11 @@
-import { copyToClipboard, type ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { copyToClipboard, type ExtensionCommandContext, type Skill } from "@earendil-works/pi-coding-agent";
+import { Key, matchesKey } from "@earendil-works/pi-tui";
 import { defineMenu, runMenu, runTask } from "@narumitw/pi-tui-kit";
 import { sanitizeTerminalText as safe } from "@narumitw/pi-tui-kit/terminal-text";
 import type { Route } from "./command.ts";
 import { prepareOperation, scanInventory } from "./filesystem.ts";
 import { discoverRepository, downloadBundles, parseRepository } from "./github.ts";
+import { type InvocationSnapshot, readInvocation, updateInvocation } from "./invocation.ts";
 import { applyRegistration, customLocation, loadLocations, previewRegistration } from "./locations.ts";
 import type {
   Environment,
@@ -25,10 +27,12 @@ export const HELP = [
   "Complete directories are copied. References outside each selected bundle are not copied or rewritten.",
   "Project means the current Pi working directory. Shared locations can also be read by compatible agents.",
   "Existing destinations are skipped; duplicate names can still conflict under Pi's native discovery rules.",
-  "Manage installed skills opens per-skill actions for scanned local locations, not every loaded Pi resource. Protected resources remain read-only.",
+  "Manage installed skills opens per-skill actions for scanned local locations, not every loaded Pi resource. Protected bundles cannot be moved or removed.",
+  "Configure model invocation lists native loaded skills, including manual-only skills and package sources. Select a skill to inspect its actual write target before changing its setting.",
+  "Invocation settings save immediately to the source file, including linked targets. User/shared edits affect other projects; package updates can replace edits. Escape does not undo saves.",
   "Single-skill Move and Remove reuse batch confirmation. Copy directory path sends the exact raw path to the clipboard in TUI only.",
   "Custom paths can be registered in native project/user skills settings, or copied without registration.",
-  "Before confirmation, cancellation changes no installed skills or settings. Confirmed batches can finish partially.",
+  "Bundle operations change nothing before confirmation. Invocation toggles save immediately; cancellation does not undo completed saves. Confirmed batches can finish partially.",
   "Do not run concurrent mutations from separate Pi processes. External filesystem edits are not locked.",
   "Reload is explicit. Removing a skill does not remove instructions already in conversation history.",
 ];
@@ -43,6 +47,8 @@ export const defaultServices = {
   previewRegistration,
   applyRegistration,
   copyToClipboard,
+  readInvocation,
+  updateInvocation,
 };
 export type Services = typeof defaultServices;
 
@@ -59,6 +65,9 @@ type Screen =
   | "review"
   | "manage"
   | "skill-actions"
+  | "invocation"
+  | "invocation-review"
+  | "invocation-setting"
   | "help"
   | "inventory-path"
   | "inventory-ready";
@@ -80,6 +89,11 @@ type Action =
   | "remove-one"
   | "copy-directory"
   | "manage-scan"
+  | "configure-invocation"
+  | "select-invocation"
+  | "review-invocation"
+  | "save-invocation"
+  | "reload"
   | "back";
 
 interface State {
@@ -99,6 +113,14 @@ interface State {
   afterScan: "manage" | "select";
   managedId?: string;
   copyMessage?: string;
+  loadedSkills: Skill[];
+  invocationId?: string;
+  invocation?: InvocationSnapshot;
+  invocationChanged: boolean;
+  invocationValues: Map<string, boolean>;
+  invocationController?: AbortController;
+  invocationReviewed?: boolean;
+  reload: boolean;
 }
 
 function actionGuard(owner: Guard, signal: AbortSignal): Guard {
@@ -110,6 +132,85 @@ function actionGuard(owner: Guard, signal: AbortSignal): Guard {
     },
     isProjectTrusted: owner.isProjectTrusted,
   };
+}
+
+function invocationContext(ctx: ExtensionCommandContext, state: State, owner: Guard): ExtensionCommandContext {
+  if (ctx.mode !== "tui") return ctx;
+  const custom: typeof ctx.ui.custom = (factory, options) =>
+    ctx.ui.custom(async (tui, theme, keybindings, done) => {
+      const controller = new AbortController();
+      state.invocationController = controller;
+      let component: Awaited<ReturnType<typeof factory>> | undefined;
+      try {
+        component = await factory(tui, theme, keybindings, done);
+        owner.check();
+      } catch (error) {
+        controller.abort();
+        component?.dispose?.();
+        throw error;
+      }
+      const input = component.handleInput?.bind(component);
+      const dispose = component.dispose?.bind(component);
+      let disposed = false;
+      component.handleInput = (data) => {
+        if (disposed) return;
+        // A save can be queued before its handler starts. Cancel the screen's
+        // settings scope first, then forward the standard key unchanged. Other
+        // actions do not use this extra signal; Kit still owns Back/Close/drain.
+        if (matchesKey(data, Key.ctrl("c")) || keybindings.matches(data, "tui.select.cancel"))
+          controller.abort(new DOMException("Invocation setting cancelled", "AbortError"));
+        input?.(data);
+      };
+      component.dispose = () => {
+        if (disposed) return;
+        disposed = true;
+        controller.abort(new DOMException("Invocation screen disposed", "AbortError"));
+        dispose?.();
+      };
+      return component;
+    }, options);
+  return { ...ctx, ui: { ...ctx.ui, custom } };
+}
+
+function invocationMode(enabled: boolean): string {
+  return enabled ? "Automatic" : "Manual only";
+}
+
+function invocationNeedsReload(state: State): boolean {
+  return (
+    state.invocationChanged ||
+    state.loadedSkills.some((skill) => {
+      const saved = state.invocationValues.get(skill.filePath);
+      return saved !== undefined && saved !== !skill.disableModelInvocation;
+    })
+  );
+}
+
+function invocationItems(state: State, rpc: boolean) {
+  return state.loadedSkills.map((skill) => {
+    const active = !skill.disableModelInvocation;
+    const saved = state.invocationValues.get(skill.filePath);
+    const mode = invocationMode(saved ?? active);
+    // SelectList falls back to its raw value when the normalized label is empty.
+    const name = safe(skill.name).trim() || "Unnamed skill";
+    const pending = saved !== undefined && saved !== active;
+    const scope =
+      skill.sourceInfo.scope === "user" ? "User" : skill.sourceInfo.scope === "project" ? "Project" : "Unknown";
+    return {
+      id: skill.filePath,
+      label: rpc
+        ? `${name} · ${mode}${pending ? " (reload pending)" : ""} · ${safe(skill.sourceInfo.scope ?? "unknown scope")} · ${safe(skill.filePath)}`
+        : name,
+      description: `${mode} · ${scope}${pending ? " · Reload pending" : ""}`,
+      details: [
+        `Skill: ${name}`,
+        `File: ${safe(skill.filePath)}`,
+        `Source: ${scope} · ${safe(skill.sourceInfo.source)}`,
+        `Active: ${invocationMode(active)}${saved !== undefined ? ` · Saved: ${mode}${pending ? " (reload pending)" : ""}` : ""}`,
+      ],
+      searchText: `${safe(skill.name)} ${safe(skill.description)} ${safe(skill.filePath)} ${safe(skill.sourceInfo.source)}`,
+    };
+  });
 }
 
 function selectedLocals(state: State) {
@@ -199,16 +300,24 @@ export function createSkillsMenu(
       main: () => ({
         kind: "actions",
         title: "Skills",
-        lines: [`Workspace: ${safe(env.cwd)}`, ...state.warnings],
+        lines: [
+          `Workspace: ${safe(env.cwd)}`,
+          ...state.warnings,
+          ...(invocationNeedsReload(state)
+            ? ["Model invocation settings saved on disk. Reload to refresh Pi's skill catalog."]
+            : []),
+        ],
         hint: "close",
         items: [
           { id: "manage", label: "Manage installed skills", to: "manage" },
+          { id: "invocation", label: "Configure model invocation", action: "configure-invocation" },
           { id: "add", label: "Add from GitHub", action: "begin" },
           { id: "remove", label: "Remove skills", action: "begin" },
           { id: "move", label: "Move skills", action: "begin" },
           { id: "scan", label: "Scan custom directory", action: "manage-scan" },
           { id: "help", label: "Help", to: "help" },
-          { id: "close", label: "Close", close: true },
+          ...(invocationNeedsReload(state) ? [{ id: "reload", label: "Reload now", action: "reload" as const }] : []),
+          { id: "close", label: invocationNeedsReload(state) ? "Close without reload" : "Close", close: true },
         ],
       }),
       source: () => ({
@@ -394,6 +503,60 @@ export function createSkillsMenu(
           ],
         };
       },
+      invocation: () => ({
+        kind: "choice",
+        title: "Configure model invocation",
+        lines: [
+          "Loaded skills. Select one to change model invocation.",
+          ...(state.loadedSkills.length ? [] : ["No loaded skills were found."]),
+        ],
+        items: invocationItems(state, rpc),
+        action: "select-invocation",
+        initialItemId: state.invocationId,
+        enableSearch: true,
+        viewportSize: 10,
+      }),
+      "invocation-review": () => ({
+        kind: "review",
+        title: "Review invocation target",
+        content: [
+          `Source file: ${safe(state.invocation?.filePath ?? "")}`,
+          `Writes target: ${safe(state.invocation?.canonicalPath ?? "")}`,
+          "Changing model invocation edits this source file, including a linked target or package file.",
+          "User/shared edits can affect other projects. Package updates can overwrite changes.",
+          "Open invocation setting only after reviewing the target. This review does not save anything.",
+        ].join("\n\n"),
+        viewportSize: "adaptive",
+        enableSearch: true,
+        ...(state.invocation
+          ? { confirm: { id: "review-invocation", label: "Open invocation setting", action: "review-invocation" } }
+          : {}),
+      }),
+      "invocation-setting": () => ({
+        kind: "settings",
+        title: "Model invocation",
+        lines: [
+          `Source file: ${safe(state.invocation?.filePath ?? "")}`,
+          `Writes target: ${safe(state.invocation?.canonicalPath ?? "")}`,
+          "Saves immediately, including linked targets. User/shared edits affect other projects; package updates can overwrite edits.",
+          "Automatic advertises this skill to the model. Manual only hides it from discovery; /skill:name still works.",
+          "Escape does not undo saves. Return to Skills for Reload now, or close without reload.",
+        ],
+        items: state.invocation
+          ? [
+              {
+                id: "model-invocation",
+                label: "Model invocation",
+                disabled: !state.invocationReviewed,
+                description:
+                  "Changes the native disable-model-invocation field. Pi's current catalog changes only after reload.",
+                currentValue: state.invocation.enabled ? "automatic" : "manual only",
+                values: ["automatic", "manual only"],
+                action: "save-invocation",
+              },
+            ]
+          : [],
+      }),
       help: () => ({ kind: "detail", title: "Skills help", lines: HELP }),
       "inventory-path": () => ({
         kind: "input",
@@ -409,6 +572,79 @@ export function createSkillsMenu(
       }),
     },
     actions: {
+      "configure-invocation": ({ ctx }) => {
+        owner.check();
+        state.loadedSkills = (ctx.getSystemPromptOptions().skills ?? [])
+          .map((skill) => ({ ...skill, sourceInfo: { ...skill.sourceInfo } }))
+          .sort((left, right) => safe(left.name).localeCompare(safe(right.name)));
+        return { kind: "to", screen: "invocation" };
+      },
+      "select-invocation": async ({ itemId, signal }) => {
+        const guard = actionGuard(owner, signal);
+        guard.check();
+        const skill = state.loadedSkills.find((skill) => skill.filePath === itemId);
+        if (!skill) throw new Error("Choose a currently loaded skill");
+        const snapshot = await services.readInvocation(skill, guard);
+        guard.check();
+        state.invocationId = itemId;
+        state.invocation = snapshot;
+        state.invocationValues.set(snapshot.filePath, snapshot.enabled);
+        state.invocationReviewed = false;
+        return { kind: "to", screen: "invocation-review" };
+      },
+      "review-invocation": () => {
+        owner.check();
+        if (!state.invocation) throw new Error("Choose a currently loaded skill");
+        state.invocationReviewed = true;
+        return { kind: "to", screen: "invocation-setting" };
+      },
+      "save-invocation": async ({ ctx, value, signal }) => {
+        const screenSignal = ctx.mode === "tui" ? state.invocationController?.signal : undefined;
+        const guard = actionGuard(owner, screenSignal ? AbortSignal.any([signal, screenSignal]) : signal);
+        try {
+          guard.check();
+          if (value !== "automatic" && value !== "manual only") throw new Error("Unknown model invocation value");
+          if (!state.invocation || !state.invocationReviewed)
+            throw new Error("Review the invocation target before changing its setting");
+          const result = await services.updateInvocation(state.invocation, value === "automatic", guard);
+          // Keep plain commit accounting even when cancellation follows publication.
+          state.invocation = result.snapshot;
+          state.invocationValues.set(result.snapshot.filePath, result.snapshot.enabled);
+          state.invocationChanged ||= result.changed;
+          if (result.changed) {
+            state.batch = undefined;
+            // Invalidate before checking cancellation: a completed save must never
+            // leave pre-save fingerprints available after Back or task disposal.
+            state.inventory = {
+              skills: [],
+              warnings: ["Inventory refresh did not finish. Reopen /skills before managing bundles."],
+            };
+          }
+          guard.check();
+          if (result.changed) {
+            try {
+              const inventory = await services.scanInventory(state.locations, guard);
+              guard.check();
+              state.inventory = inventory;
+            } catch (error) {
+              guard.check();
+              ctx.ui.notify(
+                `Setting saved, but inventory refresh failed: ${safe(error instanceof Error ? error.message : String(error))}`,
+                "warning",
+              );
+            }
+          }
+          return { kind: "stay" };
+        } catch (error) {
+          if (guard.signal.aborted) return { kind: "rejected" };
+          throw error;
+        }
+      },
+      reload: () => {
+        owner.check();
+        state.reload = true;
+        return { kind: "close" };
+      },
       "manage-scan": () => {
         owner.check();
         state.afterScan = "manage";
@@ -609,16 +845,21 @@ export async function showSkillsMenu(
     registrationScope: "none",
     confirmed: false,
     afterScan: route.kind === "main" ? "manage" : "select",
+    loadedSkills: [],
+    invocationChanged: false,
+    invocationValues: new Map(),
+    reload: false,
   };
   const start: Screen =
     route.kind === "main" ? "main" : route.kind === "add" && !route.repository ? "source" : "select";
-  await runMenu(ctx, createSkillsMenu(state, start, env, owner, services, ctx.mode), {
+  await runMenu(invocationContext(ctx, state, owner), createSkillsMenu(state, start, env, owner, services, ctx.mode), {
     getState: () => state,
     signal: owner.signal,
     isCurrent: () => !owner.signal.aborted,
     onError,
   });
   owner.check();
+  if (state.reload) return true;
   if (!state.confirmed || !state.batch) return false;
   const batch = state.batch;
   let results: OperationResult[] = [];
@@ -641,10 +882,15 @@ export async function showSkillsMenu(
   });
   owner.check();
   if (results.length === 0 && applying.kind !== "completed") return false;
-  return showResults(ctx, results, owner);
+  return showResults(ctx, results, owner, invocationNeedsReload(state));
 }
 
-async function showResults(ctx: ExtensionCommandContext, results: OperationResult[], owner: Guard) {
+async function showResults(
+  ctx: ExtensionCommandContext,
+  results: OperationResult[],
+  owner: Guard,
+  pendingReload = false,
+) {
   let reload = false;
   const content = results
     .map((result) =>
@@ -667,7 +913,7 @@ async function showResults(ctx: ExtensionCommandContext, results: OperationResul
         hint: "close",
         items: [
           { id: "results", label: "View results", to: "results" },
-          ...(results.some((result) => result.changed)
+          ...(pendingReload || results.some((result) => result.changed)
             ? [{ id: "reload", label: "Reload now", action: "reload" as const }]
             : []),
           { id: "later", label: "Close without reload", close: true },

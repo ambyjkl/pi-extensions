@@ -1,7 +1,7 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { type ExtensionCommandContext, loadSkillsFromDir } from "@earendil-works/pi-coding-agent";
 import { createRpcHarness, type RpcHarnessStep } from "@narumitw/pi-tui-kit/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultServices, showSkillsMenu } from "../menu.ts";
@@ -66,6 +66,41 @@ function choice(response: string): RpcHarnessStep {
 }
 
 describe("confirmed UI to real filesystem integration", () => {
+  it("refreshes a saved invocation setting before preparing a subsequent bundle removal", async () => {
+    const path = join(env.cwd, ".pi", "skills", "sample");
+    await mkdir(path, { recursive: true });
+    await writeFile(join(path, "SKILL.md"), content);
+    const native = loadSkillsFromDir({ dir: path, source: "project" }).skills;
+    const before = JSON.stringify(native);
+    const rpc = createRpcHarness([
+      choice("Configure model invocation"),
+      choice(`sample · Automatic · project · ${join(path, "SKILL.md")}`),
+      choice("Open invocation setting"),
+      choice("Model invocation (automatic)"),
+      choice("Back"),
+      choice("Back"),
+      choice("Back"),
+      choice("Manage installed skills"),
+      choice(`sample · Project (Pi) · ${path}`),
+      choice("Remove…"),
+      choice("Apply changes"),
+      choice("Close without reload"),
+    ]);
+    const notify = vi.fn();
+    const ctx = {
+      cwd: env.cwd,
+      mode: "rpc",
+      hasUI: true,
+      getSystemPromptOptions: () => ({ skills: native }),
+      ui: { ...rpc.ui, notify },
+    } as unknown as ExtensionCommandContext;
+    expect(await showSkillsMenu(ctx, { kind: "main" }, env, guard)).toBe(false);
+    rpc.assertConsumed();
+    expect(notify).not.toHaveBeenCalled();
+    expect(JSON.stringify(native)).toBe(before);
+    expect(rpc.dialogs.some((dialog) => dialog.title.includes("Source changed since inventory"))).toBe(false);
+    await expect(readFile(join(path, "SKILL.md"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
   it.each(["project-pi", "user-pi", "project-shared", "user-shared", "custom-project", "custom-user", "custom-copy"])(
     "installs only checked complete bundles into %s",
     async (target) => {

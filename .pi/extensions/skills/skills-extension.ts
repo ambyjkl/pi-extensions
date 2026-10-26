@@ -46,7 +46,7 @@ export function createSkillsExtension(show: ShowMenu = showMenu) {
     });
 
     pi.registerCommand("skills", {
-      description: "Install, remove, and move local skill bundles",
+      description: "Manage local skill bundles and model invocation",
       getArgumentCompletions: argumentCompletions,
       handler: async (args, ctx) => {
         const route = parseCommand(args);
