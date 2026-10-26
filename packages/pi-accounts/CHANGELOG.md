@@ -1,5 +1,11 @@
 # @narumitw/pi-accounts
 
+## 0.54.0
+
+### Minor Changes
+
+- 5442c02: Notify current-session usage consumers when an account selection is committed so status lines can refresh without waiting for the next turn. Wait for each provider's pending account activation before resolving usage authentication, including OpenRouter, Kimi, and legacy Codex.
+
 ## 0.53.3
 
 ### Patch Changes
