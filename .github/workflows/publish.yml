@@ -112,6 +112,9 @@ jobs:
         uses: changesets/action/pack@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
           publish-plan-artifact-id: ${{ needs.select-mode.outputs.publish-plan-artifact-id }}
+        env:
+          # Use the completed build; parallel prepack rebuilds can remove dependency output.
+          NPM_CONFIG_IGNORE_SCRIPTS: "true"
 
   publish:
     needs: pack
