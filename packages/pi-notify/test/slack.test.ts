@@ -221,10 +221,10 @@ describe("Slack payload", () => {
     expect(notification.body).toBe(body);
   });
   it.each([
-    ["a".repeat(2998) + "&", `\n${"a".repeat(2998)}…`],
-    ["a".repeat(2995) + "<z", `\n${"a".repeat(2995)}…`],
-    ["a".repeat(2996) + "😀xy", `\n${"a".repeat(2996)}😀…`],
-    ["a".repeat(2995) + "<", `\n${"a".repeat(2995)}&lt;`],
+    [`${"a".repeat(2998)}&`, `\n${"a".repeat(2998)}…`],
+    [`${"a".repeat(2995)}<z`, `\n${"a".repeat(2995)}…`],
+    [`${"a".repeat(2996)}😀xy`, `\n${"a".repeat(2996)}😀…`],
+    [`${"a".repeat(2995)}<`, `\n${"a".repeat(2995)}&lt;`],
     ["a".repeat(2999), `\n${"a".repeat(2999)}`],
   ])("bounds encoded text without partial entities or code points", async (body, expected) => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response("ok"));
