@@ -158,6 +158,7 @@ Both commands build Kit before starting Pi with automatic extension and skill lo
 Pi must be available on `PATH`; the launcher loads only the trusted repository demo, which runs with Pi's permissions.
 
 In Pi TUI mode, run `/tui-kit-showcase` without arguments to preview action, detail, browse, choice, settings, input, review, and multi-select screens.
+Type in the main menu to filter demo names and descriptions; spaces are part of the query. Use the configured confirm key (Enter by default) to open a matching demo, or clear the search text to show all entries.
 The menu also includes masked synthetic input, editable prefill, model/thinking selectors, theme/style samples, bounded task success/failure/cancellation, native pointer/overlay routing, and in-memory copy capture. It reopens after each standalone interaction. Runtime information identifies the local built Kit version, API version, and sanitized resolved module origin.
 All demo state stays in memory and resets on each command or session replacement. Save-default selector intent changes only demo state; no Pi settings or real session model changes occur. Enter only synthetic values in secret examples.
 The copy demo deliberately fails its first attempt, then captures exact synthetic source in memory; it never writes the system clipboard. Native examples do not replace Pi's renderer or layout. See the [showcase verification and release handoff](./docs/showcase-verification.md) for evidence, physical terminal steps, and unverified paths.
