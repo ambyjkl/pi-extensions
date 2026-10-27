@@ -107,14 +107,14 @@ for (const provider of [
             : zen
               ? "zen"
               : "zai";
-    const expected = zen ? "zen r:20% · w:10%" : `${prefix} 5h:80% · wk:90%`;
+    const expected = zen ? "zen r:80% · w:90%" : `${prefix} 5h:80% · wk:90%`;
     const value = report(provider, buckets);
     assert.equal(formatUsageStatusline(value), expected);
     const [primary, secondary] = value.buckets;
     assert.ok(primary && secondary);
     primary.used = undefined;
     primary.remaining = undefined;
-    assert.equal(formatUsageStatusline(value), zen ? "zen w:10%" : `${prefix} wk:90%`);
+    assert.equal(formatUsageStatusline(value), zen ? "zen w:90%" : `${prefix} wk:90%`);
     secondary.used = undefined;
     secondary.remaining = undefined;
     assert.equal(formatUsageStatusline(value), undefined);

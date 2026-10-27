@@ -84,7 +84,7 @@ for (const [provider, prefix] of [
       separator: " / ",
     };
     const expected =
-      provider === "opencode-go" ? `[r:11% ↻ 2h30m / 3% (w)] ${prefix}` : `[5h:89% ↻ 2h30m / 97% (wk)] ${prefix}`;
+      provider === "opencode-go" ? `[r:89% ↻ 2h30m / 97% (w)] ${prefix}` : `[5h:89% ↻ 2h30m / 97% (wk)] ${prefix}`;
     assert.deepEqual(formatUsageStatuslineWithCountdown(value, undefined, now, true, "remaining", display), {
       value: expected,
       hasCountdown: provider !== "openai-codex",
@@ -94,7 +94,7 @@ for (const [provider, prefix] of [
     value.buckets[0].used = undefined;
     assert.equal(
       formatUsageStatusline(value, undefined, now, true, "remaining", display),
-      provider === "opencode-go" ? `[3% (w)] ${prefix}` : `[97% (wk)] ${prefix}`,
+      provider === "opencode-go" ? `[97% (w)] ${prefix}` : `[97% (wk)] ${prefix}`,
     );
   });
 }

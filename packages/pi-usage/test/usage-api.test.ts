@@ -284,6 +284,7 @@ describe("usage event adapter offers and validation", () => {
 
 describe("usage potential capabilities and conservative cache reads", () => {
   const expected: Record<string, string[]> = {
+    anthropic: ["quota", "reset-time"],
     baseten: ["spend"],
     openai: ["quota", "reset-time"],
     "openai-codex": ["quota", "balance", "reset-time"],
@@ -310,7 +311,7 @@ describe("usage potential capabilities and conservative cache reads", () => {
         .map((adapter) => adapter.id)
         .sort(),
     );
-    expect(Object.keys(expected)).toHaveLength(18);
+    expect(Object.keys(expected)).toHaveLength(19);
   });
 
   it.each(Object.entries(expected))(

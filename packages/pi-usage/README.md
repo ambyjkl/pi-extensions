@@ -86,7 +86,7 @@ A successful explicit Fireworks account selection writes the generic field and r
 ### Quota statusline display
 
 Edit `statuslineDisplay` manually in the user settings file, then run `/reload`.
-It applies to Codex, Command Code, Kimi, MiniMax Token Plan Global/China, Z.AI Global/China, and OpenCode Go.
+It applies to Anthropic, Codex, Command Code, Kimi, MiniMax Token Plan Global/China, Z.AI Global/China, and OpenCode Go.
 For example, retain window labels alongside countdowns and change the separator:
 
 ```json
@@ -103,19 +103,22 @@ Missing fields keep the current defaults. Invalid templates produce a warning in
 There is no interactive template editor.
 See the [display template reference](./docs/statusline-display.md) for defaults, placeholders, validation, and unchanged provider behavior.
 
-### Codex statusline percentage
+### Statusline percentage
 
-The `codexStatusPercentage` preference accepts `"remaining"` or `"used"` and defaults to `"remaining"` to preserve existing output.
-Choose **Codex percentage** in the TUI Settings screen, or set the field manually and run `/reload`:
+The `statusPercentage` preference accepts `"remaining"` or `"used"` and defaults to `"remaining"`.
+Choose **Status percentage** in the TUI Settings screen, or set the field manually and run `/reload`:
 
 ```json
 {
-  "codexStatusPercentage": "used"
+  "statusPercentage": "used"
 }
 ```
 
 With `"used"`, a limit with 70% remaining appears as `30%`; its reset countdown or window label stays unchanged.
-This preference changes only Codex statusline formatting, not provider data or the detailed `/usage` report.
+It applies to every quota-percentage statusline: Anthropic, Codex, Command Code, Kimi, MiniMax Token Plan, Z.AI, OpenCode Go, and GitHub Copilot (which also switches its count to used, for example `copilot 55/300 18%`).
+OpenCode Go previously always showed used percentages; it now follows this preference and defaults to remaining.
+The former `codexStatusPercentage` field is still read when `statusPercentage` is absent, and saving the setting from the TUI replaces it.
+This preference changes only statusline formatting, not provider data or the detailed `/usage` report.
 
 ### Codex statusline reset countdown
 
@@ -178,6 +181,7 @@ Currencies and billing targets remain separate.
 
 | Provider | Reported data |
 | --- | --- |
+| Anthropic | Claude Pro/Max 5-hour and weekly utilization windows, resets, and extra-usage spend |
 | OpenAI (native ChatGPT OAuth) | Authentication status by default; optional companion-sourced plan percentages and plan/app resets |
 | OpenAI Codex (legacy) | Subscription windows, credits, resets, and model buckets |
 | Kimi For Coding | Plan request windows and a separate booster wallet |
@@ -212,11 +216,11 @@ After the active runtime credential changes, the next command, turn, or schedule
 ## 📊 Statusline behavior
 
 The `usage` status item is active only for selected providers that publish statusline usage.
-By default, Codex, Command Code, Kimi, MiniMax Token Plan, Z.AI, and OpenCode Go separate quota windows with ` · ` and place static labels before values, for example `cmd 5h:100% · wk:97% · mo:98%`.
+By default, Anthropic, Codex, Command Code, Kimi, MiniMax Token Plan, Z.AI, and OpenCode Go separate quota windows with ` · ` and place static labels before values, for example `cmd 5h:100% · wk:97% · mo:98%`.
 Countdown segments retain their spacing without window labels, for example `codex 89% ↻ 2h30m · 97% ↻ 5d17h`; a missing reset time falls back to a static label, such as `codex 89% ↻ 2h30m · wk:97%`.
 Single windows have no separator. [Display templates](./docs/statusline-display.md) can change this quota presentation. These presentation changes do not alter the reported values; consumers parsing the old status text must adapt to the new format. ChatGPT companion formatting is unchanged.
 
-Kimi, MiniMax Token Plan Global/China, Z.AI Global/China, Command Code, OpenCode Go, and finite GitHub Copilot quotas show countdowns automatically when a displayed quota has a valid future reset time.
+Anthropic, Kimi, MiniMax Token Plan Global/China, Z.AI Global/China, Command Code, OpenCode Go, and finite GitHub Copilot quotas show countdowns automatically when a displayed quota has a valid future reset time.
 For example, `kimi 77% ↻ 2h52m · mo:87%` mixes a countdown with a static fallback; Copilot preserves its counts, percentage, and any overage, such as `copilot 245/300 82% ↻ 6d`.
 These providers fall back to their existing static output when reset times are missing, invalid, or expired; unlimited quotas and balance/spend reports do not show countdowns.
 Their countdowns are not controlled by the Codex-only settings. Codex and ChatGPT companion retain their existing reset behavior, including `↻ 0m` for expired returned resets.
@@ -278,8 +282,9 @@ An absent or incompatible peer preserves standalone fallback and fail-closed mis
 - Numerical usage requires a meaningful provider usage source and verifiable Pi runtime auth.
 - Native `openai` has no verified native-token numerical quota API. Experimental companion reports require same-account setup, cannot independently prove shared identity, and reject incomplete/paginated app lists. Only one user-reported plan weekly comparison has been observed; app agreement and broader live behavior remain unverified.
 - Native Fast mode and earned reset redemption, and OpenAI API-key usage reporting, remain unsupported.
-- GitHub Copilot quota, Kimi managed usage, Z.AI quota, and OpenAI Codex reset redemption rely on provider-owned endpoints that may change without notice.
+- Anthropic usage, GitHub Copilot quota, Kimi managed usage, Z.AI quota, and OpenAI Codex reset redemption rely on provider-owned endpoints that may change without notice.
 - Codex reset redemption requires a current ChatGPT OAuth credential from Pi's login or a compatible credential source; Codex API keys cannot redeem earned subscription resets.
+- Anthropic usage supports only Claude Pro/Max OAuth access tokens; Anthropic API keys cannot read subscription usage.
 - xAI usage supports only a uniquely matched Pi OAuth subscription credential; xAI API keys and Management API credentials are unsupported.
 - Credentials resolved for custom provider base URLs are never forwarded to the providers' official usage endpoints; effective auth origin validation requires Pi 0.81.0 or newer.
 - Provider reports are snapshots and may themselves be delayed by the provider.

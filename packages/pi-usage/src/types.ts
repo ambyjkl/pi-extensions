@@ -97,6 +97,8 @@ export interface UsageProviderAdapter {
   publishesStatusline?: boolean;
   /** Invalidate the matching ready report when the latest query fails; default preserves it. */
   invalidateCacheOnFailure?: boolean;
+  /** Cache lifetime and scheduled statusline refresh interval for rate-limited endpoints; default is five minutes. */
+  cacheTtlMs?: number;
   targets?: UsageTargetResolver;
   query(
     auth: ResolvedUsageAuth,
@@ -214,6 +216,14 @@ export interface ZaiPlanInfo {
   name: string;
   renewsAt?: string;
 }
+
+export type AnthropicUsagePayload = {
+  five_hour?: unknown;
+  seven_day?: unknown;
+  seven_day_opus?: unknown;
+  seven_day_sonnet?: unknown;
+  extra_usage?: unknown;
+};
 
 export type KimiCodingUsagePayload = {
   usage?: unknown;

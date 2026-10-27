@@ -28,7 +28,7 @@ test("normalizes owned settings and ignores the retired xAI field", () => {
     openaiUseCodexUsage: false,
     codexFastMode: true,
     codexStatusResetCountdown: true,
-    codexStatusPercentage: "remaining",
+    statusPercentage: "remaining",
     selectedTargets: {},
     statuslineDisplay: DEFAULT_USAGE_SETTINGS.statuslineDisplay,
   });
@@ -36,7 +36,7 @@ test("normalizes owned settings and ignores the retired xAI field", () => {
     openaiUseCodexUsage: false,
     codexFastMode: false,
     codexStatusResetCountdown: true,
-    codexStatusPercentage: "remaining",
+    statusPercentage: "remaining",
     selectedTargets: { fireworks: "acme-prod" },
     statuslineDisplay: DEFAULT_USAGE_SETTINGS.statuslineDisplay,
   });
@@ -49,7 +49,7 @@ test("normalizes owned settings and ignores the retired xAI field", () => {
       openaiUseCodexUsage: false,
       codexFastMode: false,
       codexStatusResetCountdown: true,
-      codexStatusPercentage: "remaining",
+      statusPercentage: "remaining",
       selectedTargets: { fireworks: "current", custom: "project-1" },
       statuslineDisplay: DEFAULT_USAGE_SETTINGS.statuslineDisplay,
     },
@@ -291,38 +291,45 @@ test("normalizes the Codex reset countdown status preference", () => {
     openaiUseCodexUsage: false,
     codexFastMode: false,
     codexStatusResetCountdown: false,
-    codexStatusPercentage: "remaining",
+    statusPercentage: "remaining",
     selectedTargets: {},
     statuslineDisplay: DEFAULT_USAGE_SETTINGS.statuslineDisplay,
   });
   assert.equal(normalizeUsageSettings({ codexStatusResetCountdown: "false" }), undefined);
 });
 
-test("normalizes the Codex status percentage preference", () => {
-  assert.deepEqual(normalizeUsageSettings({ codexStatusPercentage: "used" }), {
+test("normalizes the status percentage preference", () => {
+  assert.deepEqual(normalizeUsageSettings({ statusPercentage: "used" }), {
     openaiUseCodexUsage: false,
     codexFastMode: false,
     codexStatusResetCountdown: true,
-    codexStatusPercentage: "used",
+    statusPercentage: "used",
     selectedTargets: {},
     statuslineDisplay: DEFAULT_USAGE_SETTINGS.statuslineDisplay,
   });
-  assert.equal(normalizeUsageSettings({ codexStatusPercentage: "remaining" })?.codexStatusPercentage, "remaining");
+  assert.equal(normalizeUsageSettings({ statusPercentage: "remaining" })?.statusPercentage, "remaining");
+  assert.equal(normalizeUsageSettings({ statusPercentage: "consumed" }), undefined);
+  assert.equal(normalizeUsageSettings({ statusPercentage: true }), undefined);
+  // The former Codex-only field stays read-compatible, and the generic field wins.
+  assert.equal(normalizeUsageSettings({ codexStatusPercentage: "used" })?.statusPercentage, "used");
+  assert.equal(
+    normalizeUsageSettings({ codexStatusPercentage: "used", statusPercentage: "remaining" })?.statusPercentage,
+    "remaining",
+  );
   assert.equal(normalizeUsageSettings({ codexStatusPercentage: "consumed" }), undefined);
-  assert.equal(normalizeUsageSettings({ codexStatusPercentage: true }), undefined);
 });
 
-test("persists the Codex status percentage preference without replacing unknown fields", async () => {
+test("persists the status percentage preference, replacing the legacy field, without dropping unknown fields", async () => {
   const path = await tempSettingsPath();
-  await writeFile(path, '{"future":"kept"}\n');
+  await writeFile(path, '{"future":"kept","codexStatusPercentage":"remaining"}\n');
   const runtime = createUsageSettingsRuntime(path);
   await runtime.reload();
 
-  await runtime.update({ codexStatusPercentage: "used" });
+  await runtime.update({ statusPercentage: "used" });
 
   assert.deepEqual(JSON.parse(await readFile(path, "utf8")), {
     future: "kept",
-    codexStatusPercentage: "used",
+    statusPercentage: "used",
   });
-  assert.equal((await runtime.reload()).settings.codexStatusPercentage, "used");
+  assert.equal((await runtime.reload()).settings.statusPercentage, "used");
 });
