@@ -9,10 +9,10 @@ const ON = "On";
 const REMAINING = "Remaining";
 const USED = "Used";
 
-type UsageSettingId = "codexFastMode" | "codexStatusResetCountdown" | "codexStatusPercentage" | "openaiUseCodexUsage";
+type UsageSettingId = "codexFastMode" | "codexStatusResetCountdown" | "statusPercentage" | "openaiUseCodexUsage";
 
 function settingValueLabel(id: UsageSettingId, value: UsageSettings[UsageSettingId]): string {
-  if (id === "codexStatusPercentage") return value === "used" ? USED : REMAINING;
+  if (id === "statusPercentage") return value === "used" ? USED : REMAINING;
   return value === true ? ON : OFF;
 }
 
@@ -54,10 +54,10 @@ export async function showUsageSettings(
           values: [OFF, ON],
         },
         {
-          id: "codexStatusPercentage",
-          label: "Codex percentage",
-          description: "Show remaining or used Codex quota in the statusline.",
-          currentValue: settingValueLabel("codexStatusPercentage", state.settings.codexStatusPercentage),
+          id: "statusPercentage",
+          label: "Status percentage",
+          description: "Show remaining or used quota percentages in the statusline.",
+          currentValue: settingValueLabel("statusPercentage", state.settings.statusPercentage),
           values: [REMAINING, USED],
         },
         {
@@ -117,7 +117,7 @@ export async function showUsageSettings(
         getSettingsListTheme(),
         (id, value) => {
           if (closing || signal.aborted || !isCurrent()) return;
-          if (id === "codexStatusPercentage") {
+          if (id === "statusPercentage") {
             queueUpdate(id, value === USED ? "used" : "remaining", value);
           } else if (id === "codexFastMode" || id === "codexStatusResetCountdown" || id === "openaiUseCodexUsage") {
             queueUpdate(id, value === ON, value);

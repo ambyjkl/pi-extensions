@@ -109,7 +109,7 @@ function codexAccessToken(accountId: string): string {
 function memorySettingsRuntime(
   options: {
     codexStatusResetCountdown?: boolean;
-    codexStatusPercentage?: "remaining" | "used";
+    statusPercentage?: "remaining" | "used";
     statuslineDisplay?: UsageSettingsState["settings"]["statuslineDisplay"];
     fireworksAccountId?: string;
     selectedTargets?: Record<string, string>;
@@ -128,7 +128,7 @@ function memorySettingsRuntime(
       statuslineDisplay: options.statuslineDisplay ?? DEFAULT_USAGE_SETTINGS.statuslineDisplay,
       codexFastMode: false,
       codexStatusResetCountdown: options.codexStatusResetCountdown ?? false,
-      codexStatusPercentage: options.codexStatusPercentage ?? "remaining",
+      statusPercentage: options.statusPercentage ?? "remaining",
       selectedTargets: {
         ...(options.fireworksAccountId ? { fireworks: options.fireworksAccountId } : {}),
         ...options.selectedTargets,
@@ -702,10 +702,10 @@ test("unsupported providers remain visible without publishing an error status", 
   const command = mock.commands.get("usage");
   assert.ok(command);
   const unsupportedModel = {
-    id: "claude",
-    name: "Claude",
-    provider: "anthropic",
-    baseUrl: "https://api.anthropic.com",
+    id: "gemini",
+    name: "Gemini",
+    provider: "google",
+    baseUrl: "https://generativelanguage.googleapis.com",
   };
   let title = "";
   const { ctx, statuses } = createMockContext({
@@ -717,7 +717,7 @@ test("unsupported providers remain visible without publishing an error status", 
       return "Close";
     },
     modelRegistry: {
-      getProviderDisplayName: () => "Anthropic",
+      getProviderDisplayName: () => "Google",
       getAvailable: () => [],
       getAll: () => [],
     },
@@ -2024,7 +2024,7 @@ test("Codex used percentage and reset countdown repaint locally and stop across 
   };
   const settings = memorySettingsRuntime({
     codexStatusResetCountdown: true,
-    codexStatusPercentage: "used",
+    statusPercentage: "used",
     statuslineDisplay: {
       ...DEFAULT_USAGE_SETTINGS.statuslineDisplay,
       template: "[{windows}] {provider}",
@@ -2828,8 +2828,8 @@ test("the TUI SettingsList describes and applies usage preferences immediately",
   assert.equal(changed, true);
   assert.equal(settings.state().settings.codexFastMode, true);
   assert.equal(settings.state().settings.codexStatusResetCountdown, true);
-  assert.equal(settings.state().settings.codexStatusPercentage, "used");
-  assert.deepEqual(applied, new Set(["codexFastMode", "codexStatusResetCountdown", "codexStatusPercentage"]));
+  assert.equal(settings.state().settings.statusPercentage, "used");
+  assert.deepEqual(applied, new Set(["codexFastMode", "codexStatusResetCountdown", "statusPercentage"]));
   const renderedSettings = rendered.map((lines) => lines.join("\n"));
   assert.ok(
     rendered.some((frame) => {
@@ -2838,7 +2838,7 @@ test("the TUI SettingsList describes and applies usage preferences immediately",
     }),
   );
   assert.ok(renderedSettings.some((frame) => /Show time remaining until each Codex usage limit resets/.test(frame)));
-  assert.ok(renderedSettings.some((frame) => /Show remaining or used Codex quota in the statusline/.test(frame)));
+  assert.ok(renderedSettings.some((frame) => /Show remaining or used quota percentages in the statusline/.test(frame)));
   assert.ok(renderedSettings.some((frame) => /Use faster Codex routing/.test(frame)));
   assert.doesNotMatch(renderedSettings.join("\n"), /Fireworks account/u);
   assert.doesNotMatch(renderedSettings.join("\n"), /xAI/iu);
@@ -2984,7 +2984,7 @@ test("Ctrl+C hard-cancels Settings before conflicting configurable actions", asy
     ...DEFAULT_USAGE_SETTINGS,
     codexFastMode: false,
     codexStatusResetCountdown: false,
-    codexStatusPercentage: "remaining",
+    statusPercentage: "remaining",
     selectedTargets: {},
   });
   assert.equal(applied, 0);
@@ -3149,7 +3149,7 @@ test("a durable settings save still applies lifecycle cleanup when disposal wins
   assert.equal(applied, 1);
 });
 
-test("the TUI SettingsList rolls back a Codex percentage change after save failure", async () => {
+test("the TUI SettingsList rolls back a status percentage change after save failure", async () => {
   const settings = memorySettingsRuntime({ failUpdates: true });
   let latest: string[] = [];
   const { ctx, notifications } = createMockContext({
@@ -3205,9 +3205,9 @@ test("the TUI SettingsList rolls back a Codex percentage change after save failu
   );
 
   assert.equal(changed, false);
-  assert.equal(settings.state().settings.codexStatusPercentage, "remaining");
+  assert.equal(settings.state().settings.statusPercentage, "remaining");
   assert.match(notifications[0]?.message ?? "", /disk full/);
-  assert.match(latest.join("\n"), /Codex percentage.*Remaining/su);
+  assert.match(latest.join("\n"), /Status percentage.*Remaining/su);
 });
 
 test("shutdown cancels an explicit xAI identity body before billing or status publication", async (t) => {

@@ -34,6 +34,7 @@ export {
   UsageCache,
 } from "./core.js";
 export { formatProviderStates, formatUsageReport, formatUsageStatusline } from "./format.js";
+export { normalizeAnthropicUsagePayload } from "./providers/anthropic.js";
 export { normalizeBasetenBillingUsagePayload } from "./providers/baseten.js";
 export { normalizeCodexBackendPayload } from "./providers/codex.js";
 export { commandCodeOrgId, normalizeCommandCodeUsagePayload } from "./providers/command-code.js";
@@ -68,7 +69,7 @@ export {
   XAI_ADAPTER,
 } from "./query.js";
 export type {
-  CodexStatusPercentage,
+  StatusPercentage,
   UsageSettings,
   UsageSettingsRuntime,
   UsageSettingsState,
@@ -82,6 +83,7 @@ export {
   usageSettingsPath,
 } from "./settings.js";
 export type {
+  AnthropicUsagePayload,
   BasetenBillingUsagePayload,
   CommandCodeAccountPayload,
   CommandCodeCreditsPayload,

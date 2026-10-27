@@ -19,7 +19,14 @@ import {
   resetOptionExpiration,
   resolveCodexResetAuth,
 } from "./codex-resets.js";
-import { abortError, awaitWithDeadline, errorMessage, runWithConcurrency, UsageCache } from "./core.js";
+import {
+  abortError,
+  awaitWithDeadline,
+  errorMessage,
+  runWithConcurrency,
+  UsageCache,
+  UsageRateLimitedError,
+} from "./core.js";
 import { formatProviderStates, formatUsageStatuslineWithCountdown } from "./format.js";
 import { createOAuthCredentialCandidateReader } from "./oauth-credential-source.js";
 import { UnsupportedOpenAIUsageAuthError } from "./providers/openai-chatgpt.js";
@@ -87,6 +94,8 @@ type QueryOutcome = {
   authState?: "unavailable" | "unsupported" | "failed";
   rememberedTargetId?: string;
   openaiPolicy?: { generation: number; enabled: boolean };
+  /** The provider throttled the query; the statusline keeps its last published text. */
+  rateLimited?: boolean;
 };
 
 class UsageTargetSelectionChangedError extends Error {
@@ -162,7 +171,7 @@ export default function usageExtension(pi: ExtensionAPI, dependencies: UsageExte
   const cache = new UsageCache(CACHE_TTL_MS, MAX_ACCOUNT_STATES, (providerId, reason) =>
     usageApi?.changed(providerId, reason),
   );
-  const failureBackoff = new Map<string, { until: number; message: string }>();
+  const failureBackoff = new Map<string, { until: number; message: string; rateLimited?: boolean }>();
   const latestQueries = new Map<string, number>();
   const providerQueries = new Map<string, number>();
   const presentationQueries = new Map<string, Set<Promise<QueryOutcome>>>();
@@ -175,6 +184,8 @@ export default function usageExtension(pi: ExtensionAPI, dependencies: UsageExte
   let sessionActive = false;
   let statusGeneration = 0;
   let sessionGeneration = 0;
+  // The last ready statusline publication, restored in place of transient states such as a provider throttle.
+  let lastReadyStatus: { providerId: string; outcome: QueryOutcome } | undefined;
   let statusRefreshTimer: ReturnType<typeof setTimeout> | undefined;
   let statusCountdownTimer: ReturnType<typeof setTimeout> | undefined;
   let statusController: AbortController | undefined;
@@ -206,6 +217,7 @@ export default function usageExtension(pi: ExtensionAPI, dependencies: UsageExte
   };
 
   const clearStatus = (ctx: ExtensionContext) => {
+    lastReadyStatus = undefined;
     statusGeneration += 1;
     statusController?.abort();
     statusController = undefined;
@@ -220,12 +232,23 @@ export default function usageExtension(pi: ExtensionAPI, dependencies: UsageExte
       statusRefreshTimer = undefined;
       if (!sessionActive || generation !== statusGeneration) return;
       startStatusRefresh(ctx, model, true);
-    }, CACHE_TTL_MS);
+    }, adapterForProvider(model.provider)?.cacheTtlMs ?? CACHE_TTL_MS);
     statusRefreshTimer.unref?.();
   };
 
   const publishStatus = (ctx: ExtensionContext, outcome: QueryOutcome, model: PiModel, shouldSchedule: boolean) => {
     if (!openaiPolicyIsCurrent(outcome.openaiPolicy)) return;
+    if (outcome.rateLimited) {
+      // Show the last good status again, with fresh countdowns, rather than an error chip.
+      const last = lastReadyStatus;
+      if (last && last.providerId === model.provider && last.outcome.fingerprint === outcome.fingerprint) {
+        publishStatus(ctx, last.outcome, model, shouldSchedule);
+        return;
+      }
+      clearStatusCountdownTimer();
+      if (safeSetStatus(ctx, undefined) && shouldSchedule && sessionActive) scheduleStatusRefresh(ctx, model);
+      return;
+    }
     clearStatusCountdownTimer();
     if (adapterForProvider(model.provider)?.publishesStatusline === false) {
       clearStatusRefreshTimer();
@@ -261,12 +284,13 @@ export default function usageExtension(pi: ExtensionAPI, dependencies: UsageExte
       model,
       now,
       showCodexResetCountdown,
-      settings.codexStatusPercentage,
+      settings.statusPercentage,
       settings.statuslineDisplay,
       (prefix) => fastRuntime.decorateStatus(model, prefix),
     );
     const value = status.value;
     if (!safeSetStatus(ctx, value)) return;
+    lastReadyStatus = { providerId: model.provider, outcome };
     if (shouldSchedule && sessionActive) scheduleStatusRefresh(ctx, model);
     if (
       sessionActive &&
@@ -499,6 +523,7 @@ export default function usageExtension(pi: ExtensionAPI, dependencies: UsageExte
           },
           fingerprint: auth.fingerprint,
           rememberedTargetId: expectedTargetId,
+          ...(previousDiscoveryFailure.rateLimited ? { rateLimited: true } : {}),
         };
       }
       const target = await resolveUsageTarget(
@@ -556,7 +581,12 @@ export default function usageExtension(pi: ExtensionAPI, dependencies: UsageExte
         };
       }
       const previousFailure = failureBackoff.get(failureKey);
-      if ((!force || apiRequest) && previousFailure && previousFailure.until > Date.now()) {
+      // A provider throttle is honored even for forced and scheduled refreshes, which would otherwise extend it.
+      if (
+        (!force || apiRequest || previousFailure?.rateLimited) &&
+        previousFailure &&
+        previousFailure.until > Date.now()
+      ) {
         return {
           state: {
             providerId: adapter.id,
@@ -567,6 +597,7 @@ export default function usageExtension(pi: ExtensionAPI, dependencies: UsageExte
           },
           fingerprint: auth.fingerprint,
           rememberedTargetId: expectedTargetId,
+          ...(previousFailure.rateLimited ? { rateLimited: true } : {}),
         };
       }
       if (apiRequest) await guard();
@@ -599,7 +630,7 @@ export default function usageExtension(pi: ExtensionAPI, dependencies: UsageExte
       if (apiRequest && latestQueries.get(failureKey) !== queryId) throw staleUsageQuery();
       if (publicationIsCurrent && latestQueries.get(failureKey) === queryId) {
         failureBackoff.delete(failureKey);
-        cache.set(adapter.id, queryFingerprint, effectiveReport);
+        cache.set(adapter.id, queryFingerprint, effectiveReport, undefined, adapter.cacheTtlMs);
       }
       checkOwnership();
       return {
@@ -651,7 +682,17 @@ export default function usageExtension(pi: ExtensionAPI, dependencies: UsageExte
       }
       if (!requestContextChanged() && latestQueries.get(failureKey) === queryId) {
         if (adapter.invalidateCacheOnFailure) cache.delete(adapter.id, queryFingerprint);
-        setBoundedMap(failureBackoff, failureKey, { until: now + FAILURE_BACKOFF_MS, message }, MAX_ACCOUNT_STATES);
+        const rateLimited = error instanceof UsageRateLimitedError;
+        setBoundedMap(
+          failureBackoff,
+          failureKey,
+          {
+            until: now + (rateLimited ? error.retryAfterMs : FAILURE_BACKOFF_MS),
+            message,
+            ...(rateLimited ? { rateLimited } : {}),
+          },
+          MAX_ACCOUNT_STATES,
+        );
         usageApi?.changed(adapter.id, "query-failed");
       }
       checkOwnership();
@@ -665,6 +706,7 @@ export default function usageExtension(pi: ExtensionAPI, dependencies: UsageExte
         },
         fingerprint: auth.fingerprint,
         rememberedTargetId: expectedTargetId,
+        ...(error instanceof UsageRateLimitedError ? { rateLimited: true } : {}),
       };
     }
   };
@@ -1441,7 +1483,7 @@ export default function usageExtension(pi: ExtensionAPI, dependencies: UsageExte
                   return;
                 }
                 if (
-                  (id === "codexStatusResetCountdown" || id === "codexStatusPercentage") &&
+                  (id === "codexStatusResetCountdown" || id === "statusPercentage") &&
                   stableCurrent &&
                   statusGeneration === menuGeneration &&
                   !controller.signal.aborted
@@ -1759,6 +1801,7 @@ export default function usageExtension(pi: ExtensionAPI, dependencies: UsageExte
     activeContext = ctx;
     // Clear old cache state before the API invalidates the old session scope.
     failureBackoff.clear();
+    lastReadyStatus = undefined;
     latestQueries.clear();
     providerQueries.clear();
     presentationQueries.clear();
@@ -1812,6 +1855,7 @@ export default function usageExtension(pi: ExtensionAPI, dependencies: UsageExte
     statusController = undefined;
     for (const controller of nativeQueryControllers) controller.abort();
     failureBackoff.clear();
+    lastReadyStatus = undefined;
     latestQueries.clear();
     providerQueries.clear();
     presentationQueries.clear();

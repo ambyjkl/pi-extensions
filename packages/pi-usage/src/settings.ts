@@ -15,13 +15,15 @@ import { isBoundedTargetId } from "./usage-targets.js";
 export const USAGE_SETTINGS_FILE = "pi-usage.json";
 export const MAX_USAGE_SETTINGS_BYTES = 64 * 1024;
 
-export type CodexStatusPercentage = "remaining" | "used";
+export type StatusPercentage = "remaining" | "used";
+/** @deprecated Use StatusPercentage. */
+export type CodexStatusPercentage = StatusPercentage;
 
 export interface UsageSettings {
   openaiUseCodexUsage: boolean;
   codexFastMode: boolean;
   codexStatusResetCountdown: boolean;
-  codexStatusPercentage: CodexStatusPercentage;
+  statusPercentage: StatusPercentage;
   selectedTargets: Record<string, string>;
   statuslineDisplay: StatuslineDisplay;
 }
@@ -30,7 +32,7 @@ export const DEFAULT_USAGE_SETTINGS: Readonly<UsageSettings> = Object.freeze({
   openaiUseCodexUsage: false,
   codexFastMode: false,
   codexStatusResetCountdown: true,
-  codexStatusPercentage: "remaining",
+  statusPercentage: "remaining",
   selectedTargets: Object.freeze({}),
   statuslineDisplay: DEFAULT_STATUSLINE_DISPLAY,
 });
@@ -82,12 +84,8 @@ export function normalizeUsageSettings(value: unknown): UsageSettings | undefine
   if (Object.hasOwn(value, "codexStatusResetCountdown") && typeof value.codexStatusResetCountdown !== "boolean") {
     return undefined;
   }
-  if (
-    Object.hasOwn(value, "codexStatusPercentage") &&
-    value.codexStatusPercentage !== "remaining" &&
-    value.codexStatusPercentage !== "used"
-  ) {
-    return undefined;
+  for (const field of ["statusPercentage", "codexStatusPercentage"]) {
+    if (Object.hasOwn(value, field) && value[field] !== "remaining" && value[field] !== "used") return undefined;
   }
   if (Object.hasOwn(value, "fireworksAccountId") && !isFireworksAccountId(value.fireworksAccountId)) {
     return undefined;
@@ -106,8 +104,11 @@ export function normalizeUsageSettings(value: unknown): UsageSettings | undefine
       typeof value.codexStatusResetCountdown === "boolean"
         ? value.codexStatusResetCountdown
         : DEFAULT_USAGE_SETTINGS.codexStatusResetCountdown,
-    codexStatusPercentage:
-      value.codexStatusPercentage === "used" ? "used" : DEFAULT_USAGE_SETTINGS.codexStatusPercentage,
+    // The former Codex-only field stays read-compatible until a save writes the generic field.
+    statusPercentage:
+      (value.statusPercentage ?? value.codexStatusPercentage) === "used"
+        ? "used"
+        : DEFAULT_USAGE_SETTINGS.statusPercentage,
     selectedTargets: effectiveTargets,
     statuslineDisplay: resolveStatuslineDisplay(value.statuslineDisplay as Partial<StatuslineDisplay> | undefined),
   };
@@ -239,6 +240,7 @@ async function saveUsageSettingsPatch(
         if (value === undefined) delete document[key];
         else document[key] = value;
       }
+      if (Object.hasOwn(patch, "statusPercentage")) delete document.codexStatusPercentage;
     },
     operations,
     signal,

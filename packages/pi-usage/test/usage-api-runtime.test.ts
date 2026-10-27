@@ -275,7 +275,7 @@ test("an existing scheduled report and an API refresh use the same cache publica
 test("refresh does not rewrite a persisted settings file", async () => {
   const runtime = await usageApiRuntime();
   try {
-    await runtime.settings.update({ codexStatusPercentage: "used" });
+    await runtime.settings.update({ statusPercentage: "used" });
     const path = join(runtime.directory, "pi-usage.json");
     const bytes = readFileSync(path, "utf8");
     assert.equal((await runtime.query({ refresh: true })).status, "ready");

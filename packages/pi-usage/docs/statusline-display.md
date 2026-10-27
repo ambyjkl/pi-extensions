@@ -70,7 +70,7 @@ Example: `[5h:89% ↻ 2h30m · wk:97%] codex fast`.
 
 ## Compatibility and validation
 
-Templates apply only to quota windows for Codex, Command Code, Kimi, MiniMax Token Plan Global/China, Z.AI Global/China, and OpenCode Go.
+Templates apply only to quota windows for Anthropic, Codex, Command Code, Kimi, MiniMax Token Plan Global/China, Z.AI Global/China, and OpenCode Go.
 They do not change percentages, window selection or ordering, model groups, or reset calculations.
 One available segment has no separator; unavailable quotas do not create empty segments.
 Unlimited windows use `window`, not `countdown`.

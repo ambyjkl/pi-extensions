@@ -5,6 +5,7 @@
 This reference preserves each provider's endpoint, authentication boundary, billing semantics, and contract evidence.
 The README contains the capability overview and shared security requirements.
 
+- [Anthropic](#anthropic-claude-promax)
 - [OpenAI native ChatGPT OAuth](#openai-native-chatgpt-oauth)
 - [OpenAI Codex](#openai-codex)
 - [Kimi For Coding](#kimi-for-coding)
@@ -22,6 +23,23 @@ The README contains the capability overview and shared security requirements.
 - [Z.AI](#zai-glm-coding-plan)
 
 ## 📋 Provider semantics
+
+### Anthropic (Claude Pro/Max)
+
+- Provider ID: `anthropic`
+- Semantics: Claude subscription usage limits
+- Source: the undocumented `GET https://api.anthropic.com/api/oauth/usage` endpoint used by Claude Code, with Pi's freshly resolved OAuth access token and `anthropic-beta: oauth-2025-04-20`
+- Allowed origin: the model and resolved-auth base URLs must be `https://api.anthropic.com`; redirects are rejected
+- Displayed data: `five_hour`, `seven_day`, `seven_day_opus`, and `seven_day_sonnet` utilization as used/remaining percentages with reset times, plus enabled extra-usage spend and monthly limit
+- Statusline: remaining percentages such as `claude 98% ↻ 2h30m · 59% ↻ 2d20h`, with static fallback `claude 5h:98% · wk:59%`
+
+Only Claude Pro/Max OAuth access tokens (`sk-ant-oat…`), whether from `/login anthropic`, a compatible OAuth extension, or `ANTHROPIC_OAUTH_TOKEN`, can read this endpoint.
+Anthropic API keys fail before any request with guidance to log in with OAuth.
+Utilization is a 0–100 used percentage, clamped; the five-hour and weekly windows are required, and Opus/Sonnet windows are shown only when present and valid.
+Extra-usage amounts arrive in minor currency units and are scaled by the reported `decimal_places` (default 2).
+The endpoint is not a published API contract and may change without notice; the response shape was checked against a live Claude Max account.
+It throttles aggressively, so reports are cached and the statusline refreshes every 15 minutes instead of five.
+An HTTP 429 leaves the statusline's last text untouched (no error chip) and reports `Anthropic usage rate limited; retry in Nm` in `/usage`, using `Retry-After` (default 5 minutes, clamped to 1–60 minutes) and suppresses every later request, including manual refreshes and scheduled retries, until that time.
 
 ### OpenAI native ChatGPT OAuth
 
@@ -82,7 +100,7 @@ Contract fixtures derive from [Specode's pinned implementation](https://github.c
 - Source: the Codex usage and earned-reset endpoints using Pi's resolved runtime authorization
 - Displayed data: returned duration-based windows, resets, credits, earned usage-limit resets, and additional model buckets
 - Reset mutation: `POST /wham/rate-limit-reset-credits/consume` with a unique redemption request ID and, when available, the selected opaque credit ID
-- Statusline examples: `codex 59% ↻ 2h30m · 61% ↻ 2d15m`, `codex fast 59% ↻ 2h30m`, or `codex spark 100% ↻ 2h30m`. Set `codexStatusPercentage` to `"used"` to show consumed percentages, or set `codexStatusResetCountdown` to `false` for static labels such as `codex 5h:59% · wk:61%`.
+- Statusline examples: `codex 59% ↻ 2h30m · 61% ↻ 2d15m`, `codex fast 59% ↻ 2h30m`, or `codex spark 100% ↻ 2h30m`. Set `statusPercentage` to `"used"` to show consumed percentages, or set `codexStatusResetCountdown` to `false` for static labels such as `codex 5h:59% · wk:61%`.
 
 The statusline selects a returned bucket that matches the current Codex model when one is available.
 The percentage preference affects only this compact status and defaults to remaining quota; it does not change the detailed report or returned usage data.
@@ -262,7 +280,7 @@ The contract was verified on 2026-08-30 against Baseten's [Billing and usage](ht
 - Source: `GET https://opencode.ai/zen/go/v1/usage` using Pi's resolved inference API key
 - Displayed data: used percentage and reset time for each window
 - Status handling: `rate-limited` windows remain visible, while unknown statuses become unavailable notes
-- Statusline examples: `zen 0% ↻ 2h30m · 4% ↻ 6d · m:2%` or static fallback `zen r:0% · w:4% · m:2%`
+- Statusline examples: `zen 100% ↻ 2h30m · 96% ↻ 6d · m:98%` or static fallback `zen r:100% · w:96% · m:98%`; `statusPercentage: "used"` shows `0%`, `4%`, and `2%`
 
 The fixed endpoint is queried only when the OpenCode Go model uses the official `https://opencode.ai` origin.
 When resolved provider auth includes a base URL, that URL must use the same origin.

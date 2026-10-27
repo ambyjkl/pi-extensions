@@ -4,7 +4,10 @@ import type { UsageReport } from "./types.js";
 type UsageCacheChangeReason = "updated" | "invalidated";
 
 export class UsageCache {
-  private readonly entries = new Map<string, { providerId: string; createdAt: number; report: UsageReport }>();
+  private readonly entries = new Map<
+    string,
+    { providerId: string; createdAt: number; ttlMs: number; report: UsageReport }
+  >();
   private readonly ttlMs: number;
   private readonly maxEntries: number;
   private notificationBatch?: {
@@ -40,10 +43,10 @@ export class UsageCache {
   ): { report: UsageReport; expiresAt: number } | undefined {
     this.notifyChanges(this.sweepExpired(now));
     const entry = this.entries.get(cacheKey(providerId, fingerprint));
-    return entry ? { report: entry.report, expiresAt: entry.createdAt + this.ttlMs } : undefined;
+    return entry ? { report: entry.report, expiresAt: entry.createdAt + entry.ttlMs } : undefined;
   }
 
-  set(providerId: string, fingerprint: string, report: UsageReport, now = Date.now()): void {
+  set(providerId: string, fingerprint: string, report: UsageReport, now = Date.now(), ttlMs = this.ttlMs): void {
     const invalidated = this.sweepExpired(now);
     const key = cacheKey(providerId, fingerprint);
     this.entries.delete(key);
@@ -53,7 +56,7 @@ export class UsageCache {
       this.entries.delete(oldest[0]);
       invalidated.add(oldest[1].providerId);
     }
-    this.entries.set(key, { providerId, createdAt: now, report });
+    this.entries.set(key, { providerId, createdAt: now, ttlMs, report });
     this.notifyChanges(invalidated, providerId);
   }
 
@@ -82,7 +85,7 @@ export class UsageCache {
   private sweepExpired(now: number): Set<string> {
     const invalidated = new Set<string>();
     for (const [key, entry] of this.entries) {
-      if (now - entry.createdAt >= this.ttlMs) {
+      if (now - entry.createdAt >= entry.ttlMs) {
         this.entries.delete(key);
         invalidated.add(entry.providerId);
       }
@@ -118,6 +121,17 @@ export class UsageCache {
     } finally {
       this.notificationBatch = undefined;
     }
+  }
+}
+
+/** A provider throttled the usage request; callers must not retry before `retryAfterMs` elapses. */
+export class UsageRateLimitedError extends Error {
+  override readonly name = "UsageRateLimitedError";
+  constructor(
+    message: string,
+    readonly retryAfterMs: number,
+  ) {
+    super(message);
   }
 }
 

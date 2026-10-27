@@ -3,8 +3,9 @@
 import { randomBytes } from "node:crypto";
 import { type ExtensionContext, readStoredCredential } from "@earendil-works/pi-coding-agent";
 import { createUsageAuthGuard, type UsageAuthLifecycle } from "./auth-resolution-guard.js";
-import { abortError, errorMessage, fingerprintResolvedAuth, redactUsageError } from "./core.js";
+import { abortError, errorMessage, fingerprintResolvedAuth, redactUsageError, UsageRateLimitedError } from "./core.js";
 import { fallbackOAuthCredentialCandidates, type OAuthCredentialCandidateReader } from "./oauth-credential-source.js";
+import { normalizeAnthropicUsagePayload } from "./providers/anthropic.js";
 import { normalizeBasetenBillingUsagePayload } from "./providers/baseten.js";
 import { normalizeCodexBackendPayload } from "./providers/codex.js";
 import { commandCodeOrgId, normalizeCommandCodeUsagePayload } from "./providers/command-code.js";
@@ -26,6 +27,7 @@ import { normalizeXaiBillingPayload } from "./providers/xai.js";
 import { normalizeZaiQuotaPayload, normalizeZaiSubscriptionPayload } from "./providers/zai.js";
 import { zaiResponseError } from "./providers/zai-errors.js";
 import type {
+  AnthropicUsagePayload,
   BasetenBillingUsagePayload,
   CodexBackendPayload,
   CommandCodeAccountPayload,
@@ -55,6 +57,12 @@ import type {
 } from "./types.js";
 import { resolveUsageTarget } from "./usage-targets.js";
 
+const ANTHROPIC_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
+const ANTHROPIC_OAUTH_BETA = "oauth-2025-04-20";
+const ANTHROPIC_CACHE_TTL_MS = 15 * 60 * 1000;
+const RATE_LIMIT_DEFAULT_RETRY_MS = 5 * 60 * 1000;
+const RATE_LIMIT_MIN_RETRY_MS = 60 * 1000;
+const RATE_LIMIT_MAX_RETRY_MS = 60 * 60 * 1000;
 const BASETEN_BILLING_USAGE_URL = "https://api.baseten.co/v1/billing/usage_summary";
 const BASETEN_USAGE_WINDOW_DAYS = 30;
 const CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
@@ -91,6 +99,20 @@ const MAX_ERROR_BODY_BYTES = 4 * 1024;
 export const AUTH_FINGERPRINT_SALT = randomBytes(32);
 
 export const SUPPORTED_ADAPTERS: readonly UsageProviderAdapter[] = [
+  {
+    id: "anthropic",
+    displayName: "Anthropic",
+    // This undocumented endpoint throttles aggressively, so poll it far less often than the default.
+    cacheTtlMs: ANTHROPIC_CACHE_TTL_MS,
+    semantics: { kind: "consumer-subscription", label: "Claude subscription usage limits" },
+    async query(auth, signal, timeoutMs) {
+      const payload = await fetchProviderJson(ANTHROPIC_USAGE_URL, auth, signal, timeoutMs, "Anthropic usage", {
+        redirect: "error",
+        rateLimitBackoff: true,
+      });
+      return normalizeAnthropicUsagePayload(payload as AnthropicUsagePayload, Date.now());
+    },
+  },
   {
     id: "baseten",
     displayName: "Baseten",
@@ -559,6 +581,30 @@ export async function resolveUsageAuth(
       model,
     });
   }
+  if (adapter.id === "anthropic") {
+    const resolvedAuthorization = authorizationFrom(auth);
+    const access = bearerToken(resolvedAuthorization);
+    // Only Claude Pro/Max OAuth access tokens can read subscription usage; API keys cannot.
+    if (!access?.includes("sk-ant-oat")) {
+      throw new Error(
+        "Anthropic usage requires a Claude Pro/Max OAuth login (/login anthropic); API keys cannot read subscription usage.",
+      );
+    }
+    const authorization = `Bearer ${access}`;
+    return finalize({
+      apiKey: access,
+      headers: { Authorization: authorization, "anthropic-beta": ANTHROPIC_OAUTH_BETA },
+      fingerprint: "",
+      secrets: [
+        access,
+        auth.apiKey,
+        headerValue(auth.headers, "Authorization"),
+        resolvedAuthorization,
+        authorization,
+      ].filter((value): value is string => Boolean(value)),
+      model,
+    });
+  }
   const authorization = authorizationFrom(auth);
   if (!authorization) return undefined;
   const headers = { Authorization: authorization };
@@ -622,7 +668,9 @@ export async function queryProviderUsage(
       (error instanceof Error && error.name === "UsageStaleContextError")
     )
       throw error;
-    throw new Error(redactUsageError(errorMessage(error), auth.secrets));
+    const message = redactUsageError(errorMessage(error), auth.secrets);
+    if (error instanceof UsageRateLimitedError) throw new UsageRateLimitedError(message, error.retryAfterMs);
+    throw new Error(message);
   }
 }
 
@@ -693,6 +741,8 @@ export async function fetchProviderJson(
     method?: "GET" | "POST";
     body?: Record<string, unknown>;
     redirect?: RequestRedirect;
+    /** Turn HTTP 429 into a UsageRateLimitedError that carries the provider's Retry-After delay. */
+    rateLimitBackoff?: boolean;
     userAgent?: boolean;
     maxSuccessBodyBytes?: number;
     responseError?: (status: number, text: string) => string | undefined;
@@ -732,6 +782,13 @@ export async function fetchProviderJson(
       controller.signal,
     );
     if (controller.signal.aborted) throw Object.assign(new Error("Usage query aborted."), { name: "AbortError" });
+    if (response.status === 429 && request.rateLimitBackoff) {
+      const retryAfterMs = rateLimitRetryDelay(response.headers.get("retry-after"));
+      throw new UsageRateLimitedError(
+        `${description} rate limited; retry in ${formatRetryDelay(retryAfterMs)}`,
+        retryAfterMs,
+      );
+    }
     const responseError = request.responseError?.(response.status, text);
     if (responseError) throw new Error(responseError);
     if (!response.ok) {
@@ -759,6 +816,22 @@ export async function fetchProviderJson(
     clearTimeout(timeout);
     signal.removeEventListener("abort", abortFromCaller);
   }
+}
+
+function rateLimitRetryDelay(header: string | null): number {
+  let delayMs = RATE_LIMIT_DEFAULT_RETRY_MS;
+  const value = header?.trim();
+  if (value) {
+    const seconds = /^\d+$/u.test(value) ? Number(value) : undefined;
+    const date = seconds === undefined ? Date.parse(value) : Number.NaN;
+    if (seconds !== undefined) delayMs = seconds * 1_000;
+    else if (!Number.isNaN(date)) delayMs = date - Date.now();
+  }
+  return Math.min(RATE_LIMIT_MAX_RETRY_MS, Math.max(RATE_LIMIT_MIN_RETRY_MS, delayMs));
+}
+
+function formatRetryDelay(delayMs: number): string {
+  return `${Math.ceil(delayMs / 60_000)}m`;
 }
 
 async function readBoundedResponse(
@@ -1002,6 +1075,7 @@ function hasOfficialOrigin(model: PiModel, providerId: string): boolean {
 function hasOfficialUrlOrigin(value: string, providerId: string): boolean {
   try {
     const url = new URL(value);
+    if (providerId === "anthropic") return url.origin === "https://api.anthropic.com";
     if (providerId === "baseten") {
       return ["https://inference.baseten.co", "https://api.baseten.co"].includes(url.origin);
     }

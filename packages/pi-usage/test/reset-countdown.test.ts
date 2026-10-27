@@ -55,23 +55,31 @@ function quotaReport(provider: string, resetsAt = now / 1_000 + 150): UsageRepor
 function staticStatus(provider: string, prefix: string): string {
   return provider === "github-copilot"
     ? "copilot 245/300 82%"
-    : `${prefix} ${provider === "opencode-go" ? "r:20" : "5h:80"}%`;
+    : `${prefix} ${provider === "opencode-go" ? "r" : "5h"}:80%`;
 }
 
 function countdownStatus(provider: string, prefix: string, time: string): string {
-  return provider === "github-copilot"
-    ? `copilot 245/300 82% ↻ ${time}`
-    : `${prefix} ${provider === "opencode-go" ? 20 : 80}% ↻ ${time}`;
+  return provider === "github-copilot" ? `copilot 245/300 82% ↻ ${time}` : `${prefix} 80% ↻ ${time}`;
 }
 
 for (const [provider, prefix] of providers) {
   test(`${provider} adds a countdown without changing quota semantics`, () => {
     const value = quotaReport(provider);
     const before = structuredClone(value);
-    // Codex preferences do not control these providers.
-    assert.equal(formatUsageStatusline(value, undefined, now, false, "used"), countdownStatus(provider, prefix, "3m"));
+    assert.equal(
+      formatUsageStatusline(value, undefined, now, false, "remaining"),
+      countdownStatus(provider, prefix, "3m"),
+    );
     assert.deepEqual(value, before);
     assert.equal(formatUsageStatusline(value, undefined, now + 60_000), countdownStatus(provider, prefix, "2m"));
+  });
+
+  test(`${provider} honors the used status percentage`, () => {
+    const copilot = provider === "github-copilot";
+    assert.equal(
+      formatUsageStatusline(quotaReport(provider), undefined, now, false, "used"),
+      copilot ? "copilot 55/300 18% ↻ 3m" : `${prefix} 20% ↻ 3m`,
+    );
   });
 
   for (const [name, reset] of [
@@ -129,10 +137,11 @@ test("Command Code shows three countdowns in existing window order", () => {
   assert.equal(formatUsageStatusline(value, undefined, now), "cmd 100% ↻ 2h30m · 97% ↻ 6d · 98% ↻ 20d");
 });
 
-test("OpenCode Go preserves used percentage, mixed windows, and custom duration fallback", () => {
+test("OpenCode Go honors the percentage preference, mixed windows, and custom duration fallback", () => {
   const value = quotaReport("opencode-go", now / 1000 + 9000);
   value.buckets.push({ id: "weekly", label: "Weekly", unit: "percent", used: 10, resetsAt: now / 1000 + 6 * 86400 });
-  assert.equal(formatUsageStatusline(value, undefined, now), "zen 20% ↻ 2h30m · 10% ↻ 6d");
+  assert.equal(formatUsageStatusline(value, undefined, now), "zen 80% ↻ 2h30m · 90% ↻ 6d");
+  assert.equal(formatUsageStatusline(value, undefined, now, true, "used"), "zen 20% ↻ 2h30m · 10% ↻ 6d");
   const kimi = quotaReport("kimi-coding", now / 1000);
   kimi.buckets[0].windowMinutes = 90;
   assert.equal(formatUsageStatusline(kimi, undefined, now), "kimi 90m:80%");
@@ -189,7 +198,7 @@ async function setup(provider: (typeof providers)[number], value = quotaReport(p
       ...DEFAULT_USAGE_SETTINGS,
       codexFastMode: false,
       codexStatusResetCountdown: false,
-      codexStatusPercentage: "remaining",
+      statusPercentage: "remaining",
       selectedTargets: {},
     },
     document: {},
